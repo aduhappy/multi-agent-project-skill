@@ -8,24 +8,33 @@
 
 ---
 
-## 🚀 一行安装
+## 🚀 安装
 
-**macOS / Linux：**
+### 方式一：让 agent 自主安装（推荐）
+
+直接对任何 AI agent（Claude / Cursor / Gemini / ZCode / Codex / Copilot 等）说一句：
+
+> **把 `aduhappy/multi-agent-project-skill` 装成 skill**
+
+agent 会自己判断操作系统、把仓库 clone 到本工具的 skills 目录、装完提示你新开会话即可触发。**无需手动选平台、无需手动挑路径。**
+
+目标 skills 目录（agent 会自行选其一）：
+- ZCode / Claude Code：`~/.agents/skills/multi-agent-project`（用户级）或 `<项目>/.agents/skills/multi-agent-project`（项目级）
+- Cursor / 其他：参考各自文档的 skills/rules 目录
+
+### 方式二：手动 clone（备用）
+
+仓库地址：`https://github.com/aduhappy/multi-agent-project-skill.git`
+
 ```bash
-mkdir -p ~/.agents/skills && git clone https://github.com/aduhappy/multi-agent-project-skill.git ~/.agents/skills/multi-agent-project
+# 用户级（装一次，所有项目可用）
+git clone https://github.com/aduhappy/multi-agent-project-skill.git ~/.agents/skills/multi-agent-project
+
+# 项目级（仅某个项目）
+git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skills/multi-agent-project
 ```
 
-**Windows（PowerShell）：**
-```powershell
-New-Item -ItemType Directory -Force "$HOME\.agents\skills" | Out-Null; git clone https://github.com/aduhappy/multi-agent-project-skill.git "$HOME\.agents\skills\multi-agent-project"
-```
-
-**Windows（cmd）：**
-```cmd
-mkdir "%USERPROFILE%\.agents\skills" 2>nul & git clone https://github.com/aduhappy/multi-agent-project-skill.git "%USERPROFILE%\.agents\skills\multi-agent-project"
-```
-
-> 💬 **对任何 AI agent 说一句「**把 `aduhappy/multi-agent-project-skill` 装成 skill**」即可**——它会自动执行上面的 clone 命令到 skills 目录。装完新开一个会话就能触发。
+> Windows 用户的 `~` 对应 `%USERPROFILE%`；若 skills 目录不存在，先 `mkdir` 再 clone。
 
 ---
 
@@ -70,19 +79,9 @@ mkdir "%USERPROFILE%\.agents\skills" 2>nul & git clone https://github.com/aduhap
 | ZCode | `AGENTS.md` | ✅ |
 | 任何文本工具 | `AGENTS.md`（纯 Markdown） | ✅ |
 
-## 安装（其他方式）
+## 只要模板文件，不要 skill
 
-顶部「一行安装」是**用户级**（装一次，所有项目可用），下面是两种补充：
-
-### 项目级（仅某个项目用）
-
-```bash
-git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skills/multi-agent-project
-```
-
-### 只想要模板文件，不要 skill
-
-直接复制 `assets/` 目录下的文件到你的项目根：
+不想装成 skill、只想要骨架文件？直接复制 `assets/` 目录下的文件到你的项目根：
 - `assets/AGENTS.md` → 你的项目 `AGENTS.md`
 - `assets/CLAUDE.md` → 你的项目 `CLAUDE.md`
 - `assets/任务规划_模板.md` → 你的项目 `文档/任务规划_<主题>.md`
