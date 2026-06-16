@@ -1,0 +1,14 @@
+# OS / editor clutter
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Local skill development scratch (never commit large/intermediate files)
+*.tif
+*.npz
+*.parquet
+__pycache__/

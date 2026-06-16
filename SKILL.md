@@ -1,0 +1,102 @@
+---
+name: multi-agent-project
+description: 初始化或重构"跨 agent、跨软件可续接"的项目文档骨架。当用户开新项目/新课题、想建立多智能体协同工作流、提到 AGENTS.md / CLAUDE.md / GEMINI.md / .cursorrules / copilot-instructions / 项目记忆 / agent 接力 / 换软件继续 / 上下文丢失，或现有项目缺统一入口导致每个 agent 反复问相同问题、互相覆盖、接不上前任工作时使用。即使是"帮我建个项目文档""怎么让多个 AI 工具协同""开个新课题要准备什么"这类模糊请求也适用。
+---
+
+# 多 Agent 协同项目骨架（跨软件可续接）
+
+## 一句话安装（用户让你"装这个 skill"时直接跑）
+来源仓库：`https://github.com/aduhappy/multi-agent-project-skill`。clone 到 skills 目录即装好（无需其他依赖）：
+- **macOS / Linux**：`mkdir -p ~/.agents/skills && git clone https://github.com/aduhappy/multi-agent-project-skill.git ~/.agents/skills/multi-agent-project`
+- **Windows（PowerShell）**：`New-Item -ItemType Directory -Force "$HOME\.agents\skills" | Out-Null; git clone https://github.com/aduhappy/multi-agent-project-skill.git "$HOME\.agents\skills\multi-agent-project"`
+- **Windows（cmd）**：`mkdir "%USERPROFILE%\.agents\skills" 2>nul & git clone https://github.com/aduhappy/multi-agent-project-skill.git "%USERPROFILE%\.agents\skills\multi-agent-project"`
+
+装完告诉用户新开一个会话即可触发。项目级安装把目标路径换成 `<项目根>/.agents/skills/multi-agent-project`。
+
+## 这技能干嘛
+在项目根目录生成一套**软件无关的纯 Markdown 协同骨架**——一个权威入口 + 若干薄指针 + 自包含任务卡 + 收工规矩。换 Claude / Cursor / Gemini / ZCode / Copilot 任何一个，agent 进来读同一份入口就能接上前任工作，不丢上下文、不互相覆盖。
+
+核心原则三条：
+1. **真相只有一份**：AGENTS.md 是唯一权威入口；其他工具的约定文件（CLAUDE.md / GEMINI.md / .cursorrules / copilot-instructions.md）全是 3 行薄指针，指向 AGENTS.md。
+2. **细节外链、入口要短**：AGENTS.md 控制在 1–2 屏，每个新 agent 都得读完。细则下沉到 `文档/` 下的专题文档，入口只放指针。
+3. **纯 Markdown + 相对路径**：不依赖任何软件专属语法，换工具不破。
+
+## 何时触发
+- 用户说"开新项目/新课题""怎么组织文档让 AI 协同""AGENTS.md 怎么写""多个 agent 接力"。
+- 现有项目 agent 经常问重复问题、找不到状态、覆盖彼此产出。
+- 用户要把"手工总结的协同经验"固化成可复用结构。
+
+## 怎么用（两种模式）
+
+### 模式 A：从零生成骨架
+1. 问清：项目根目录、一句话目标、要兼容哪些 AI 工具、是否云同步目录。
+2. 从 `assets/` 复制 `AGENTS.md` 到根目录，填入用户给的内容；没给的留占位符 `【待填】`。
+3. 按用户勾选的工具，复制对应薄指针文件（CLAUDE.md / GEMINI.md / .cursorrules / copilot-instructions.md），内容统一是"以 AGENTS.md 为准"。
+4. 建 `文档/任务规划_<主题>.md`（从 `assets/任务规划_模板.md` 复制）；每个数据集目录放 `来源.txt`（从 `assets/来源.txt` 复制）。
+5. 把用户的环境、约束写成 §铁律、§路径约定。
+6. 跑完后告诉用户：骨架生成了哪些文件、每个占位符还要他填什么。
+
+### 模式 B：诊断已有项目
+用户已有项目但协同乱：先读现有 AGENTS.md / README，对照下方 §文件骨架 和 §AGENTS.md 七板块 检查缺什么，给出修补清单（缺薄指针？入口太长？任务卡不自包含？没来源.txt？没收工规矩？）。用户确认后补齐。
+
+## 文件骨架（生成后长这样）
+```
+<项目根>/
+├── AGENTS.md                          ← 唯一权威入口（所有工具默认读）
+├── CLAUDE.md                          ← 薄指针 → "以 AGENTS.md 为准"
+├── GEMINI.md                          ← 薄指针（同上，可选）
+├── .cursorrules                       ← 薄指针（Cursor 用，可选）
+├── .github/copilot-instructions.md    ← 薄指针（Copilot 用，可选）
+├── 文档/
+│   ├── 任务规划_<主题>.md             ← 自包含任务卡
+│   ├── 决策记录/                      ← 关键技术决策（可选，见 advanced.md）
+│   └── 词汇表.md                      ← 项目术语（可选）
+├── <数据集名>/                        ← 每个数据集一个目录
+│   ├── 来源.txt                       ← DOI/URL/日期/口径/单位
+│   └── ...
+└── 进度日志.md                        ← 带日期戳的变更流水（可选）
+```
+
+## AGENTS.md 的七个固定板块（顺序即优先级）
+照 `assets/AGENTS.md` 模板填。核心是：
+
+1. **一句话北极星**——这项目到底干嘛、给谁、什么基调（语气、投稿/交付目标、别耽误哪条主线）。
+2. **当前故事/方法**——最新定下来的方向 + 核心方法 + 最近换过什么、为什么。
+3. **现在在哪**——每次收工更新，1–5 条**带日期戳**的进展。这是接力最关键的交接点。
+4. **任务看板**——`[ ]`/`[x]` + 谁负责 + 依赖（T1→T2，哪些可并行）+ 已知风险。
+5. **铁律/约定**——违反会返工的：环境调用、绘图/数据规矩、命名、口径。
+6. **路径约定**——大文件去哪、小产物回哪（防多 agent 撞车、防云同步爆炸）。**单独成节，别埋**。
+7. **深读指针 + 环境/工具**——细节去哪个文档、完整工具路径怎么调。
+
+## 跨软件能续的四个硬要求
+1. **纯 Markdown + 相对路径 + 标准文件名**——别用某软件专属语法、别硬编码绝对路径。
+2. **数据带 `来源.txt`**（DOI/URL/下载日期/口径/单位/已知问题）——换人换 agent 都能溯源。
+3. **收工规矩写进铁律**——每个 agent 退出前更新 §现在在哪 + §任务看板（+ 做 handoff/记忆）。
+4. **路径纪律**——"大文件进工作盘、小产物回仓库""复制不剪切，别动别人正在跑的路径"。
+
+## 两层续接（缺一不可）
+- **硬续接（主依赖）**：仓库里的 Markdown，软件无关，任何 agent/人都能读。这是真相源。
+- **软续接（增强）**：记忆层（ChatMem / Cursor memory / Claude memory）加速检索，但别让核心结论只活在记忆里——必须落回 Markdown。
+
+> 判据：把所有记忆层删光，下个 agent 只靠仓库 Markdown 也能接上 → 合格。
+
+## 任务卡要"冷启动可执行"
+照 `assets/任务规划_模板.md`。每张卡含：**目标 / 输入（精确路径·URL·DOI）/ 输出（精确落盘）/ 环境 / 注意（坑·铁律）/ 验收（可运行检查或可见产物）/ 依赖 / 已知风险**。
+判据：一个零上下文的 agent 只看这张卡就能动手，不用问。
+
+## 进阶板块（按需启用，见 references/advanced.md）
+核心七板块之外，这些在项目变大时有用，**别一上来就全堆上**：
+- **决策记录（ADR）**——记"为什么弃用某方法"，防止下个 agent 重新踩坑、重新质疑已定的事。
+- **词汇表**——项目特有术语/缩写，新 agent 不用猜。
+- **进度日志**——带日期戳的变更流水，比 §现在在哪 更细。
+- **验收具体化**——DoD 写成可运行检查命令，而非"完成了就行"。
+- **标准 handoff 摘要**——现状/下一步/未解决风险/关键文件路径。
+- **命名约定 + 幂等性**——输出文件带 `_v1`/日期/坐标系；可重跑脚本幂等（有缓存跳过）。
+- **环境锁**——conda env 钉 `environment.yml`，防跨机器重建漂移。
+- **数据快照/不可变输入**——原始数据只读带 hash，所有人在副本上动。
+
+## 自定义提醒
+- 这套骨架来自真实科研项目（多 agent、多数据集、长管线、云同步）实战。复制后按领域裁剪：纯前端项目可砍掉 §路径约定 的"工作盘"部分；单 agent 小脚本项目 §任务看板 可简化。
+- 模板占位符统一用 `【待填】`，填完删掉。
+- 薄指针文件内容统一（见 `assets/CLAUDE.md`），**别在每个里写不同规则**——那会破坏"真相只有一份"。
+- 不要覆盖用户已有的 AGENTS.md；如果是模式 B 诊断，先读后改、增量修补。
