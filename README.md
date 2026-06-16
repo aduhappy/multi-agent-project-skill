@@ -92,6 +92,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 ```
 <项目根>/
 ├── AGENTS.md                          ← 唯一权威入口（七板块）
+├── STATUS.md                          ← 当前 handoff 状态（收工落盘）
 ├── CLAUDE.md                          ← 薄指针 → "以 AGENTS.md 为准"
 ├── GEMINI.md                          ← 薄指针
 ├── .cursorrules                       ← 薄指针（Cursor）
@@ -125,8 +126,9 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 1. **纯 Markdown + 相对路径 + 标准文件名**——别用某软件专属语法
 2. **数据带 `来源.txt`**（DOI/URL/日期/口径/单位）——换人换 agent 都能溯源
-3. **收工规矩写进铁律**——每个 agent 退出前更新 §现在在哪 + §任务看板
+3. **收工规矩写进铁律**——每个 agent 退出前更新 §现在在哪 + §任务看板 + 写/更新 `STATUS.md`（handoff 落盘文件，下个 agent 读这个就能接上，不依赖对话历史）
 4. **路径纪律**——"大文件进工作盘、小产物回仓库""复制不剪切"
+5. **新 agent（含子 agent）进门第一件事**——读完 AGENTS.md（含 STATUS.md）再动手，不靠对话历史、不凭记忆乱猜
 
 ## 两层续接（缺一不可）
 
