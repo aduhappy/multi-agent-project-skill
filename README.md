@@ -18,9 +18,13 @@
 
 agent 会自己判断操作系统、把仓库 clone 到本工具的 skills 目录、装完提示你新开会话即可触发。**无需手动选平台、无需手动挑路径。**
 
-目标 skills 目录（agent 会自行选其一）：
-- ZCode / Claude Code：`~/.agents/skills/multi-agent-project`（用户级）或 `<项目>/.agents/skills/multi-agent-project`（项目级）
-- Cursor / 其他：参考各自文档的 skills/rules 目录
+目标 skills 目录（agent 会根据当前工具自行选对）：
+
+| 工具 | 用户级路径 | 项目级路径 |
+|---|---|---|
+| ZCode / Codex CLI | `~/.agents/skills/multi-agent-project` | `<项目>/.agents/skills/multi-agent-project` |
+| Claude Code | `~/.claude/skills/multi-agent-project` | `<项目>/.claude/skills/multi-agent-project` |
+| Cursor | N/A | `.cursor/rules/`（现代）或 `.cursorrules`（legacy）|
 
 ### 方式二：手动 clone（备用）
 
@@ -72,7 +76,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 | 工具 | 入口文件 | 支持 |
 |---|---|---|
 | Claude Code | `CLAUDE.md` → AGENTS.md | ✅ |
-| Cursor | `.cursorrules` / `.cursor/rules/` | ✅ |
+| Cursor | `.cursorrules` / `.cursor/rules/` | ✅（`.cursorrules` 为 legacy，推荐 `.cursor/rules/*.mdc`）|
 | Gemini CLI | `GEMINI.md` → AGENTS.md | ✅ |
 | GitHub Copilot | `.github/copilot-instructions.md` | ✅ |
 | OpenAI Codex | `AGENTS.md` | ✅ |
@@ -86,6 +90,8 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 - `assets/CLAUDE.md` → 你的项目 `CLAUDE.md`
 - `assets/任务规划_模板.md` → 你的项目 `文档/任务规划_<主题>.md`
 - `assets/来源.txt` → 各数据集目录
+
+> ⚠️ **中文文件名注意**：模板里 `任务规划_模板.md`、`委派任务模板.md`、`来源.txt` 含中文名。在部分 CI/工具/编码下可能出现路径问题（URL 编码不一致等）。如果你的 toolchain 对此挑剔，重命名为 ASCII 文件名（如 `task_plan.md`、`delegation_template.md`、`source.txt`）并更新 AGENTS.md §6 的指针即可。内容不受影响。
 
 ## 生成的文件骨架
 
@@ -124,7 +130,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 > 入口控制在 1–2 屏，每个 agent 都得读完；细节全部外链。完整说明见 [`references/advanced.md`](references/advanced.md)（8 个进阶板块：ADR、词汇表、进度日志、验收具体化、handoff 格式、命名约定、环境锁、数据快照）。
 
-## 跨软件能续的四个硬要求
+## 跨软件能续的五个硬要求
 
 1. **纯 Markdown + 相对路径 + 标准文件名**——别用某软件专属语法
 2. **数据带 `来源.txt`**（DOI/URL/日期/口径/单位）——换人换 agent 都能溯源
