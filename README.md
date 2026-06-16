@@ -104,6 +104,8 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 ├── <数据集名>/
 │   ├── 来源.txt                       ← DOI/URL/日期/口径
 │   └── ...
+├── scripts/                           ← 代码归位（不散落根目录）
+│   └── README.md                      ← 脚本索引：干嘛/输入/输出/作者
 └── 进度日志.md                        ← 带日期戳的变更流水
 ```
 
