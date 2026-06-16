@@ -149,3 +149,10 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 - **文档 / 模板内容**：[CC BY-SA 4.0](LICENSE-CC-BY-SA-4.0)
 
 本项目遵循 [agents.md](https://agents.md/) 开放标准。
+
+## 参考
+
+下列项目为本 skill 的设计提供了关键启发：
+
+- [netresearch/agent-rules-skill](https://github.com/netresearch/agent-rules-skill) —— 双许可证结构、README 发布标配、薄指针（CLAUDE.md 9 字节）的做法
+- [breezewish/CodexPotter](https://github.com/breezewish/CodexPotter) —— 跨轮次文件记忆（STATUS.md）、新 agent 进门仪式、任务委派话术的灵感
