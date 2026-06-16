@@ -146,8 +146,4 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 - **代码 / 脚本**：[MIT](LICENSE-MIT)
 - **文档 / 模板内容**：[CC BY-SA 4.0](LICENSE-CC-BY-SA-4.0)
 
-## 致谢
-
-- [agents.md](https://agents.md/) —— 开放标准
-- [netresearch/agent-rules-skill](https://github.com/netresearch/agent-rules-skill) —— 双许可证结构和软件工程向的参照
-- [VoltAgent/awesome-agent-skills](https://github.com/VoltAgent/awesome-agent-skills) —— 社区索引
+本项目遵循 [agents.md](https://agents.md/) 开放标准。
