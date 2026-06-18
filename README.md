@@ -48,6 +48,12 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 设计目标——**真相只有一份**：`AGENTS.md` 是唯一权威入口，其他工具的约定文件（`CLAUDE.md` / `GEMINI.md` / `.cursorrules` / `.github/copilot-instructions.md`）全是 3 行薄指针，指向 `AGENTS.md`。换任何 AI 工具，agent 都读同一份入口，不丢上下文、不互相覆盖。
 
+四条核心原则：
+1. **真相只有一份** — AGENTS.md 是唯一权威入口
+2. **细节外链、入口要短** — 入口 1–2 屏，细则下沉
+3. **纯 Markdown + 相对路径** — 换工具不破
+4. **信任但验证** — agent 自检不够，关键产物须独立复核才放行
+
 ### 和同类 skill 的区别
 
 | Skill | 定位 | 适用 |
@@ -61,6 +67,10 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 - **自包含任务卡**——冷启动可执行，零上下文 agent 能直接动手
 - **决策记录（ADR）+ 词汇表 + 进度日志**——防下个 agent 重新踩坑、重新质疑已定的事
 - **收工规矩**——每个 agent 退出前更新现状 + 看板，保证接力不断
+- **独立复核阀门**——"别信自检"，关键产物必须主控/第三 agent 抽验后才放行下一棒
+- **关键数字防漂移**——同一数字只在一处写定，收工前做一致性核对
+- **坏产物退役隔离**——错产物立即标注作废，静默复用比没产出更致命
+- **委派模板含已知坑+自查清单**——引导 agent 在报完成前自拦截常见错误类型
 
 ## 何时触发
 
@@ -130,13 +140,17 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 > 入口控制在 1–2 屏，每个 agent 都得读完；细节全部外链。完整说明见 [`references/advanced.md`](references/advanced.md)（8 个进阶板块：ADR、词汇表、进度日志、验收具体化、handoff 格式、命名约定、环境锁、数据快照）。
 
-## 跨软件能续的五个硬要求
+## 跨软件能续的七个硬要求
 
 1. **纯 Markdown + 相对路径 + 标准文件名**——别用某软件专属语法
 2. **数据带 `来源.txt`**（DOI/URL/日期/口径/单位）——换人换 agent 都能溯源
 3. **收工规矩写进铁律**——每个 agent 退出前更新 §现在在哪 + §任务看板 + 写/更新 `STATUS.md`（handoff 落盘文件，下个 agent 读这个就能接上，不依赖对话历史）
 4. **路径纪律**——"大文件进工作盘、小产物回仓库""复制不剪切"
 5. **新 agent（含子 agent）进门第一件事**——读完 AGENTS.md（含 STATUS.md）再动手，不靠对话历史、不凭记忆乱猜
+6. **关键数字单一来源**——同一数字只在一处写定，别处只引用不复述；收工核对一致性
+7. **坏产物退役隔离**——错产物立即标 `_DEPRECATED` + AGENTS.md 红字通告 + 看板更新
+
+> 新增的 6 和 7 来自实战教训：多 agent 各自改文档会导致数字漂移（同一值差 1%+），坏产物被下游静默复用比没产出更致命。
 
 ## 两层续接（缺一不可）
 

@@ -1,0 +1,15 @@
+Dataset: <name>
+===============
+
+- **Source** (paper): <Author Year Journal> (DOI: 10.xxxx/xxxxx)
+- **Download URL**: <URL, e.g., Dryad / Figshare / Zenodo link>
+- **Download date**: YYYY-MM-DD
+- **Files in this directory**:
+  - `<filename>`: <raw SI / cleaned table / original raster>
+- **Measurement method**: <e.g., size_53µm fractionation / density fractionation / chemical oxidation KMnO4; eligible for main regression?>
+- **Units**: <e.g., g/kg or Mg/ha>
+- **Coverage / scale**: <number of samples, geographic extent, time range>
+- **Known issues**: <e.g., 1691 rows with conservation偏差 |SOC-(POC+MAOC)|>1; no stand-age field; units need conversion>
+- **Cleaning / processing log**: <what deduplication, field alignment, unit conversion, subset filtering was applied>
+
+> Cross-dataset deduplication rule: deduplicate by DOI + coordinates (±0.01°) + approximate values to avoid double-counting the same original study across multiple meta-analyses.

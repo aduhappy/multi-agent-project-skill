@@ -94,3 +94,23 @@ D:\software\...\condabin\conda.bat env export -n dlcm > environment.yml
 ## 9. 给 AI agent 委派任务的标准话术
 
 每次派新 agent 时，用统一格式开头（照 `assets/委派任务模板.md`）——让 agent 知道该读什么、不碰什么、往哪输出、出问题往哪汇报。核心价值：**一次到位，不用事后再纠正**。在 AGENTS.md §6 放一行指针："`委派任务话术模板 → 文档/委派任务模板.md`"。
+
+## 10. 独立复核协议（Independent Review Protocol）
+
+关键产物的独立复核**不是锦上添花，是链路可信的前置条件**。定义可运行的复核脚本：
+
+- `scripts/review_<task>.py` —— 抽验关键数字：守恒偏差 < 0.5%、行列数匹配预期、单位统一。
+- 复核脚本与任务脚本分离，由**不同 agent 或主控**运行，避免"自检自"。
+- 复核通过 → 产物标记 `_REVIEWED`；不通过 → 退回修复 + 记录 ADR。
+
+## 11. 关键数字一致性核对清单（Shutdown Number Audit）
+
+收工前，对一遍所有文件里的同一数字，跑核对脚本：
+
+```bash
+grep -n "MAOC" docs/*.md STATUS.md AGENTS.md  # 揪出所有出现过该数字的地方
+```
+
+- 同一数值在不同文件差 1% 以上即标记 bug。
+- 核对结果写入 STATUS.md 的 `### 收工核对` 小节。
+- 多轮迭代时，上一轮的数字变化记录到进度日志，避免下一轮 agent 以为"数字在漂"。
