@@ -1,12 +1,14 @@
-# STATUS.md — Current State (Most Recent Handoff)
+# STATUS.md — Incremental Handoff (Most Recent)
 
-> Read this file to instantly pick up the current work state — **no conversation history needed** (conversations can be compressed or reset; files persist).
-> Shutdown convention: Every agent must update this file on exit. AGENTS.md §3 keeps only "1–2 most recent items + → see STATUS.md".
+> This file **only records increments**: what this agent did this round, which files changed, what pitfalls were hit.
+> For full cumulative state see AGENTS.md §3/§4; STATUS.md doesn't repeat the full picture, only "what changed since last time".
+> Shutdown convention: Every agent must update this file on exit.
 
 ## Handoff (YYYY-MM-DD, agent: xxx)
 
-- **Status**: <1–3 items, what's currently being worked on and how far along>
-- **Next step**: <first action for the next agent, precise to command/file path>
-- **Unresolved risks**: <pitfalls the next agent needs to watch out for>
-- **Key file paths**: <3–5 most important entry/data/output files>
-- **Blockers**: <needs user confirmation X / waiting for data download / waiting for external dependency>
+- **What this agent did**: <what this agent did this round, 1–3 items, verb-first. E.g.: Completed T3 raster resampling, output 12 tifs>
+- **Files touched**: <which files added/modified/deleted, exact paths. E.g.: new `outputs/t3/*.tif`, updated `scripts/reproject.py`>
+- **Key number changes**: <new/revised key numbers this round. E.g.: MAOC mean 4.2 → 4.18 g/kg (fixed unit conversion bug)>
+- **Pitfalls / warnings for the next agent**: <pitfalls this agent hit or points the next agent should watch. E.g.: some raster NoData is -9999 not 0, don't add directly>
+- **Suggested next step**: <next agent's first action, precise to command/file. E.g.: first run `python scripts/check_t3.py` for acceptance>
+- **Blockers**: <needs user confirmation X / waiting for data / waiting for external dependency. Write "None" if no blockers>

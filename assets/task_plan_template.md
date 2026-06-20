@@ -6,6 +6,7 @@
 ## T1 【Task Name】
 - **Goal**: 【One sentence: what to produce】
 - **Owner**: 【TODO: data agent / modeling agent / user】
+- **⚙️ Recommended model** (optional): 【TODO: Claude Sonnet 4 / GLM / DeepSeek / MIMO — model suited for this task. Leave blank for any. Note: long-context multi-file reading prefers Claude; code generation prefers DeepSeek; Chinese writing prefers GLM】
 - **Input** (exact path / URL / DOI):
   - 【TODO: data at `manual_download/X/xxx.csv`】
   - 【TODO: literature DOI: 10.xxxx/xxxxx】
@@ -18,11 +19,18 @@
   - 【TODO: method must be size_53µm; density method does not enter backbone】
   - 【TODO: discrete data resampling use near/mode】
 - **Acceptance** (runnable check or visible output):
-  - 【TODO: `python check.py` exits 0 / conservation偏差 all < 0.5%】
+  - 【TODO: `python check.py` exits 0 / conservation deviation all < 0.5%】
   - 【TODO: figure X/Y axes have Chinese labels, no SimHei missing-glyph boxes】
 - **Dependencies**: None / depends on T0
-- **Known risks**: 【TODO: Dataset X has conservation偏差 to flag; certain env package may fail to install】
+- **Known risks**: 【TODO: Dataset X has conservation deviation to flag; certain env package may fail to install】
 - **Status**: ✅Completed 2026-06-15 / ⏳In Progress / ⬜Not Started
+- **Pre-delivery must-do** (check off all before reporting done):
+  - [ ] Acceptance checklist all passed
+  - [ ] (Critical tasks) Independent review passed (see AGENTS.md §5 "Independent Review Gate")
+  - [ ] Updated AGENTS.md §3 (cumulative snapshot, with date) + §4 task board status checked off
+  - [ ] Wrote STATUS.md (incremental: what this round did / which files touched / pitfalls hit)
+  - [ ] Key number consistency audit (same number across docs differs < 1%, see §5)
+  - [ ] If new script: updated `scripts/README.md`; if new data: updated `source.txt`
 
 ## T2 【Task Name】
 (Copy the structure above and fill)

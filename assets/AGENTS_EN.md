@@ -2,6 +2,12 @@
 
 > **North Star**: 【TODO: one sentence on what this project does, who it's for, the tone. Example: Study X using method Y, target journal Z / audience W. Don't derail the main line AAA.】
 
+> ⚡ **TL;DR (speed-read on entry, 3 lines is enough, details below)**
+> - **Current stage**: 【TODO: e.g. T3 in progress】
+> - **Next step**: 【TODO: first action, precise to file/command】
+> - **Blockers**: 【TODO: None / waiting for user to confirm X / waiting for data】
+> (This block is updated on every shutdown; full state in §3, task board in §4)
+
 > ✅ **Onboarding ritual**: After reading this file, confirm you understand — ① North Star (§1) ② Current state and blockers (§3) ③ What iron rules constrain you (§5–5.5, especially "non-conflatable dimensions" and method/unit constraints). Every sub-agent entering later must also read this file first before doing anything.
 
 ---
@@ -15,10 +21,11 @@
 - 【TODO: core method, recent changes and why. One sentence — details at §6 pointers / decision records】
 - 【TODO: core data foundation (which dataset / which paper)】
 
-## 3. Where We Are Now (Update on every shutdown)
+## 3. Where We Are Now (Update on every shutdown — cumulative snapshot, incremental details sink to STATUS.md)
 - ✅ 【TODO: most recent accomplishment, with date. Example 2026-06-15: Dataset X downloaded and cleaned at <path>】
 - ✅ 【TODO: another completed item】
 - ⏳ See §4 Task Board for remaining items
+- `→ This round's incremental handoff (what this agent did / files touched / pitfalls hit) see STATUS.md`
 - **Blockers** (if any — structure: problem / who's blocked / what was tried / waiting for whom / related docs):
   - 【TODO: Example: Dataset A method inconsistent with Paper B — compared 3 methods, none match (see `reports/xxx.md`), waiting for advisor decision on which to use. Write "None" if no blockers.】
 
@@ -38,7 +45,7 @@
 - 【TODO: Cross-dataset deduplication rules. Example: Deduplicate by DOI + coordinates (±0.01°) + approximate values】
 - **Non-conflatable dimensions** (from setup): 【TODO: e.g., 53µm method ≠ density method; g/kg ≠ Mg/ha; Albers ≠ WGS84; topsoil ≠ subsoil — treat as separate analysis dimensions.】
 - **Code organization**: Scripts go in `scripts/`, not scattered in root. Each new script updates `scripts/README.md` (purpose, input, output, author). Root directory only for entry files and thin pointers.
-- **Shutdown convention**: Every agent updates §3/§4 + writes/updates `STATUS.md` (handoff dump: current state / next step / risks / key paths). Guarantees next agent **resumes without conversation history**.
+- **Shutdown convention**: Every agent updates §3 (cumulative snapshot, with date) + §4 task board + writes/updates `STATUS.md` (**incremental handoff**: what this round did / files touched / pitfalls hit, don't repeat §3). On shutdown run `python scripts/check_handoff.py` to self-check — verifies §3 date is fresh, TL;DR filled, STATUS.md non-template, thin pointers exist. All pass = handoff qualified.
 - **Independent review gate (critical tasks)**: Outputs affecting paper conclusions or downstream pipelines must pass independent spot-check by the orchestrator or another agent (conservation/bounds/cell count/magnitude/document consistency) before being considered complete. "Self-checks passed" is not a completion criterion. Outputs are marked "PENDING REVIEW — do not use downstream" until independent review passes.
 - **Single source for key numbers**: The same number (mean, percentage, area, statistic) is written in exactly one place (STATUS.md or AGENTS.md §3). Other locations reference but don't restate. Before shutdown, verify number consistency across all docs — a >1% difference for the same value is a bug; fix before handoff.
 - **Bad output retirement**: If an agent's output is found to be wrong, immediately do four things: ① Rename directory/file with `_DEPRECATED` suffix or move to `_retired/`; ② Red-annotate `> ⚠️ 【RETIRED】<path> <reason>` at top of this section; ③ Update §4 task board status to `[x]` + label "retired"; ④ Update STATUS.md. **Never rely on memory saying "don't use that"** — silent downstream reuse of bad output is more damaging than having no output.

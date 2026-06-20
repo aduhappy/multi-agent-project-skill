@@ -66,13 +66,17 @@ Four core principles:
 Key differentiators:
 - **Path conventions** — Big files to work drive, small outputs back to repo (prevents cloud-sync explosions / multi-agent collisions)
 - **Dataset `source.txt`** — DOI/URL/date/method/units — any agent switch preserves traceability
-- **Self-contained task cards** — Cold-start executable; zero-context agent can work directly
+- **Self-contained task cards** — Cold-start executable; zero-context agent can work directly (with "pre-delivery must-do" checklist + optional recommended model)
 - **ADR + glossary + progress log** — Prevents the next agent from re-debating settled decisions or re-treading old ground
 - **Shutdown conventions** — Every agent updates status + task board on exit, keeping the handoff chain intact
 - **Independent review gate** — "Don't trust self-checks" — critical outputs must pass independent spot-check before the next step
 - **Key number anti-drift** — Same number written in exactly one place; consistency verified at shutdown
 - **Bad output retirement** — Wrong outputs immediately tagged and isolated; silent reuse is more damaging than no output
 - **Delegation template with pitfalls + self-check** — Guides agents to self-intercept common error types before reporting done
+- **AGENTS.md top TL;DR block** — 3-line speed-read (current stage / next step / blockers); new agent knows state without reading the whole file
+- **STATUS.md incremental handoff** — Only records "what this round did / files touched / pitfalls hit"; no overlap with AGENTS.md §3 cumulative snapshot
+- **check_handoff.py shutdown self-check** — Script verifies §3 date freshness / TL;DR filled / STATUS non-template / thin pointers exist; all pass = handoff qualified
+- **Task card directory index** — Dependency chain + current status table; new agent knows which card to start with
 
 ### When to Trigger
 
