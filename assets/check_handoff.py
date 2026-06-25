@@ -20,6 +20,7 @@ check_handoff.py — 收工交接自检脚本（multi-agent-project skill 配套
   4. STATUS.md 存在、非空、非模板（有真实 Handoff 日期，不是 YYYY-MM-DD）
   5. STATUS.md 的 Handoff 日期 >= AGENTS.md §3 最近日期（增量不能比累计旧）
   6. 勾选的薄指针文件至少存在一个且指向 AGENTS.md（CLAUDE.md / GEMINI.md / .cursorrules / copilot-instructions.md）
+  7. §4 看板有至少一项已勾选（防止收工后看板全未开始）
 
 退出码：0 = 全过，1 = 有失败项。
 """
@@ -53,7 +54,14 @@ check("AGENTS.md 存在且非空", len(agents_text.strip()) > 100,
 
 
 # ---------- 2. §3 有近 7 天日期戳 ----------
-dates_in_agents = re.findall(r"20\d{2}-\d{2}-\d{2}", agents_text)
+# 只搜 §3 节内日期，避免被参考文献/来源.txt 等处的日期污染
+sec3 = re.search(r"(?:^## 3\.|^## 现在在哪|^## Where We Are Now).*?(?=^## )", agents_text, re.MULTILINE | re.DOTALL)
+if not sec3:
+    sec3 = re.search(r"## 3\.", agents_text, re.MULTILINE)
+if not sec3:
+    sec3 = re.search(r"现在在哪|Where We Are Now", agents_text)
+
+dates_in_agents = re.findall(r"20\d{2}-\d{2}-\d{2}", sec3.group(0) if sec3 else "")
 recent_in_agents = False
 latest_agents_date = None
 if dates_in_agents:
@@ -72,12 +80,13 @@ check("§3 有近 7 天日期戳", recent_in_agents,
 
 
 # ---------- 3. TL;DR 块不是占位符 ----------
-tldr_section = re.search(r"⚡.*?当前阶段.*?(?=✅|---)", agents_text, re.DOTALL)
+# 匹配中英文两种 TL;DR 写法
+tldr_section = re.search(r"⚡.*?(?:当前阶段|Current stage).*?(?=✅|---)", agents_text, re.DOTALL)
 tldr_ok = False
 if tldr_section:
     blob = tldr_section.group(0)
     # 占位符判定：含【待填 或 TODO 或 例
-    tldr_ok = "【待填" not in blob and "TODO" not in blob and "例" not in blob
+    tldr_ok = "【待填" not in blob and "TODO" not in blob and "例" not in blob and "e.g." not in blob.lower()
 check("AGENTS.md TL;DR 块已填（非占位符）", tldr_ok,
       "TL;DR 块还含【待填/TODO，收工时应更新当前阶段" if not tldr_ok else "已填")
 
@@ -136,6 +145,38 @@ for p in thin_pointers:
         else:
             pointer_detail = f"{p} 存在但不指向 AGENTS.md"
 check("薄指针文件存在且指向 AGENTS.md", found_pointer, pointer_detail)
+
+
+# ---------- 7. §4 看板有已勾选项 ----------
+sec4 = re.search(r"(?:^## 4\.|^## 下一步任务看板|^## Next Task Board|^## 任务看板).*?(?=^## )", agents_text, re.MULTILINE | re.DOTALL)
+sec4_has_checked = False
+sec4_detail = "未找到 §4 看板"
+if sec4:
+    sec4_text = sec4.group(0)
+    checked = re.findall(r"\[x\]", sec4_text)
+    unchecked = re.findall(r"\[\s?\]", sec4_text)
+    sec4_has_checked = len(checked) >= 1
+    sec4_detail = f"§4 看板：{len(checked)} 已完成 / {len(unchecked)} 未完成"
+check("§4 看板有至少一项已勾选", sec4_has_checked, sec4_detail)
+
+
+# ---------- 8. TL;DR 最新日期 >= §3 最近日期（TL;DR 和 §3 不矛盾） ----------
+tldr_dates = re.findall(r"20\d{2}-\d{2}-\d{2}", tldr_section.group(0)) if tldr_section else []
+tldr_latest = None
+for d in tldr_dates:
+    try:
+        dt = datetime.strptime(d, "%Y-%m-%d")
+        if tldr_latest is None or dt > tldr_latest:
+            tldr_latest = dt
+    except ValueError:
+        pass
+tldr_vs_sec3_ok = True  # 无日期时不扣分，仅做可用时检查
+tldr_vs_sec3_detail = "TL;DR 无日期或 §3 无日期，跳过"
+if tldr_latest and latest_agents_date:
+    tldr_vs_sec3_ok = tldr_latest >= latest_agents_date - timedelta(days=1)  # 允许 1 天偏差（TL;DR 可能忘记更新日期但在同一天）
+    tldr_vs_sec3_detail = (f"TL;DR {tldr_latest} vs §3 {latest_agents_date} 一致" if tldr_vs_sec3_ok
+                           else f"TL;DR {tldr_latest} < §3 {latest_agents_date} —— TL;DR 日期比 §3 旧，TL;DR 收工没更新")
+check("TL;DR 和 §3 日期无矛盾", tldr_vs_sec3_ok, tldr_vs_sec3_detail)
 
 
 # ---------- 汇总 ----------

@@ -56,8 +56,8 @@ Project root `【TODO: absolute path】` is in `【TODO: e.g., OneDrive】` and 
 | Directory | Purpose |
 |---|---|
 | `<project-root>\` | Small outputs (KB–few MB: CSVs, PNGs, scripts, md, final small rasters) |
-| `F:\xxx_scratch\` | Large/intermediate files (GB-level RF intermediate rasters, full packages — never in project) |
-| `F:\xxx_tmp\` | General temp |
+| `【TODO: work drive, e.g. D:\scratch or /mnt/scratch】\` | Large/intermediate files (GB-level RF intermediate rasters, full packages — never in project) |
+| `【TODO: temp dir】\` | General temp |
 
 - **Criterion**: Single file >50MB or batch >dozen files → scratch; small files → project.
 - Scripts **declare output paths as top-level constants** (e.g., `SCRATCH = r'F:\xxx_scratch'`, `PROJ_OUT = r'...\output'`) for easy inspection and drive relocation.
