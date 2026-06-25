@@ -161,7 +161,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 ## 两层续接（缺一不可）
 
 - **硬续接（主依赖）**：仓库里的 Markdown，软件无关，任何 agent/人都能读——这是真相源。
-- **软续接（增强）**：记忆层（ChatMem / Cursor memory / Claude memory）加速检索，但别让核心结论只活在记忆里，必须落回 Markdown。
+- **软续接（增强）**：记忆层（Cursor memory / Claude memory）加速检索，但别让核心结论只活在记忆里，必须落回 Markdown。
 
 > 判据：把所有记忆层删光，下个 agent 只靠仓库 Markdown 也能接上 → 合格。
 
@@ -184,3 +184,4 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 - [netresearch/agent-rules-skill](https://github.com/netresearch/agent-rules-skill) —— 双许可证结构、README 发布标配、薄指针（CLAUDE.md 9 字节）的做法
 - [breezewish/CodexPotter](https://github.com/breezewish/CodexPotter) —— 跨轮次文件记忆（STATUS.md）、新 agent 进门仪式、任务委派话术的灵感
+- [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) —— 生命周期钩子驱动的工作流、完成闸门、会话恢复模式
