@@ -84,3 +84,5 @@ When done, you MUST:
 > 💡 Copy this to your project's `docs/` directory. Every time you delegate, just copy-paste and fill — no need to rephrase each time.
 
 > 💡 Copy this to your project's `docs/` directory. Every time you delegate, just copy-paste and fill — no need to rephrase each time.
+
+> 🚀 **Even less work**: each task card already embeds a *pre-filled* `📋 Dispatch prompt (copy-paste ready)` block at the end (see `task_plan_template.md`, end of T1). Fill the fields when you create the card, then delegating is just copy-paste — no filling. This file is only a field-meaning reference.
