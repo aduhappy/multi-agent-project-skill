@@ -21,8 +21,13 @@ check_handoff.py — 收工交接自检脚本（multi-agent-project skill 配套
   5. STATUS.md 的 Handoff 日期 >= AGENTS.md §3 最近日期（增量不能比累计旧）
   6. 勾选的薄指针文件至少存在一个且指向 AGENTS.md（CLAUDE.md / GEMINI.md / .cursorrules / copilot-instructions.md）
   7. §4 看板有至少一项已勾选（防止收工后看板全未开始）
+  8. TL;DR 最新日期 >= §3 最近日期（TL;DR 和 §3 不矛盾）
 
-退出码：0 = 全过，1 = 有失败项。
+另有 2 项语义自检（advisory，只警告不判失败）：
+  A. 决策登记表存在（具约束力的口径/排除清单别只埋在 STATUS 长叙事里）
+  B. 多脚本口径漂移检测（同一大写常量集合在不同脚本里成员不一致——H28 类接力事故）
+
+退出码：0 = 全过（含仅 advisory 警告），1 = 有失败项。
 """
 import os
 import re
@@ -179,6 +184,57 @@ if tldr_latest and latest_agents_date:
 check("TL;DR 和 §3 日期无矛盾", tldr_vs_sec3_ok, tldr_vs_sec3_detail)
 
 
+# ---------- 语义漂移自检（advisory，只警告不判失败）----------
+# 这两项不计入 pass/fail，只提醒——针对"决策埋没"和"多脚本口径漂移"两类隐蔽接力事故。
+warnings = []
+
+
+def warn(name, detail=""):
+    warnings.append((name, detail))
+
+
+# A. 决策登记表是否存在（具约束力决策应收口到有界可查的一处，而非埋在 STATUS 长叙事）
+registry_found = "决策登记表" in agents_text or "决策登记表" in status_text
+registry_file = os.path.join(ROOT, "文档", "决策登记表.md")
+if os.path.exists(registry_file):
+    registry_found = True
+if not registry_found:
+    warn("缺决策登记表",
+         "没找到『决策登记表』——具约束力的口径/排除清单/选定参数建议收口到一张有界可 grep 的表"
+         "（见 references/advanced.md §1a），别只躺在 STATUS 长叙事里被下家漏读。")
+
+
+# B. 多脚本口径漂移：同一大写常量集合在不同脚本里编码不一致（H28 类事故）
+scripts_dir = os.path.join(ROOT, "scripts")
+const_re = re.compile(r"^([A-Z][A-Z0-9_]{2,})\s*=\s*(\{[^{}]*\}|\[[^\[\]]*\])", re.MULTILINE)
+const_map = {}  # NAME -> { normalized_rhs -> set(files) }
+if os.path.isdir(scripts_dir):
+    for root_dir, _, files in os.walk(scripts_dir):
+        for fn in files:
+            if not fn.endswith(".py"):
+                continue
+            fp = os.path.join(root_dir, fn)
+            try:
+                with open(fp, encoding="utf-8") as f:
+                    code = f.read()
+            except Exception:
+                continue
+            for m in const_re.finditer(code):
+                name, rhs = m.group(1), m.group(2)
+                # 归一化：取出引号内的成员，排序后比对（忽略空白/顺序）
+                members = tuple(sorted(re.findall(r"['\"]([^'\"]+)['\"]", rhs)))
+                if not members:
+                    continue
+                const_map.setdefault(name, {}).setdefault(members, set()).add(
+                    os.path.relpath(fp, ROOT))
+    for name, variants in const_map.items():
+        if len(variants) > 1:
+            lines = "; ".join(
+                f"{list(v)} = {{{', '.join(mem)}}}" for mem, v in variants.items())
+            warn(f"口径漂移：常量 {name} 在多脚本里成员不一致",
+                 f"{lines} —— 抽进唯一 config 让各脚本读取，并核对决策登记表（见 advanced.md §1c）。")
+
+
 # ---------- 汇总 ----------
 print("=" * 60)
 print("  收工交接自检（check_handoff.py）")
@@ -191,9 +247,18 @@ for name, ok, detail in results:
     print(f"  {status}  {name}")
     if detail:
         print(f"           {detail}")
+if warnings:
+    print("-" * 60)
+    for name, detail in warnings:
+        print(f"  ⚠️ WARN  {name}")
+        if detail:
+            print(f"           {detail}")
 print("=" * 60)
 if all_pass:
-    print("  🎉 全部通过，交接合格。")
+    msg = "  🎉 全部通过，交接合格。"
+    if warnings:
+        msg += f"（另有 {len(warnings)} 条 advisory 提醒，建议处理但不阻塞）"
+    print(msg)
     sys.exit(0)
 else:
     fails = sum(1 for _, ok, _ in results if not ok)

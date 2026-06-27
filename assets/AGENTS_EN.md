@@ -65,7 +65,11 @@ Project root `【TODO: absolute path】` is in `【TODO: e.g., OneDrive】` and 
 
 ## 6. Deep-Read Pointers (Details live elsewhere, not here)
 - **Task specs**: `docs/task_plan_<topic>.md` ← read before starting work
-- **Key decisions (ADR)**: `docs/decision_records/` (why methods were rejected)
+- **Decision registry** (binding decisions, single authoritative source — grep this before modeling/pulling data):
+  | ID | Decision | Value/method | Reason | Date | Evidence | Supersedes |
+  |----|----------|--------------|--------|------|----------|------------|
+  | 【TODO D-01】 | 【one-line decision】 | 【value/set/route】 | 【why】 | YYYY-MM-DD | →docs… | — |
+- **Decision detail cards (ADR)**: `docs/decision_records/` (expand the complex rows; why methods were rejected)
 - **Glossary**: `docs/glossary.md` (project terms/abbreviations)
 - **Key data / literature sources**: each dataset `<dataset_name>/source.txt`
 - 【TODO: review reports, advisor debriefs, and other topic documents】
