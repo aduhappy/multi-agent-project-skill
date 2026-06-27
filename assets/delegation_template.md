@@ -66,6 +66,21 @@ Schedule independent review after delivery: the orchestrator or another agent wi
 Before independent review passes, this output is considered "PENDING REVIEW" — no downstream agent may use it.
 ```
 
+## Shutdown Steps (Mandatory — skip breaks the handoff chain)
+
+When done, regardless of outcome, execute the following shutdown actions (append to your delegation template):
+
+```text
+When done, you MUST:
+1. Update AGENTS.md §3 (cumulative snapshot with date) + §4 task board status
+2. Write STATUS.md (incremental: what this round did / files touched / pitfalls hit)
+3. If new scripts were added, update scripts/README.md
+4. Shutdown self-check: python scripts/check_handoff.py (all pass = handoff qualified)
+5. If new data was added, update the dataset's source.txt
+```
+
 ---
+
+> 💡 Copy this to your project's `docs/` directory. Every time you delegate, just copy-paste and fill — no need to rephrase each time.
 
 > 💡 Copy this to your project's `docs/` directory. Every time you delegate, just copy-paste and fill — no need to rephrase each time.

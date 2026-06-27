@@ -147,7 +147,7 @@ Update AGENTS.md §3 (current status) + §4 (task board) + write STATUS.md. Guar
 ## Two Layers of Resumability (Both Required)
 
 - **Hard resumability (primary)**: Repo markdown — tool-agnostic, readable by any agent or human. This is the source of truth.
-- **Soft resumability (enhancement)**: Memory layer (ChatMem / Cursor memory / Claude memory) accelerates retrieval, but never let core conclusions live only in memory — they must land in markdown.
+- **Soft resumability (enhancement)**: Memory layer (Cursor memory / Claude memory) accelerates retrieval, but never let core conclusions live only in memory — they must land in markdown.
 
 > Criterion: Delete all memory layers. If the next agent can resume using only repo markdown → **pass**.
 

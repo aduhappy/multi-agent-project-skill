@@ -161,7 +161,7 @@ Template numbered 1–7, with **path conventions as §5.5** (too important to bu
 ## Two Layers of Resumability (Both Required)
 
 - **Hard resumability (primary)**: Repo markdown — tool-agnostic, readable by any agent or human. This is the source of truth.
-- **Soft resumability (enhancement)**: Memory layer (ChatMem / Cursor memory / Claude memory) accelerates retrieval, but never let core conclusions live only in memory.
+- **Soft resumability (enhancement)**: Memory layer (Cursor memory / Claude memory) accelerates retrieval, but never let core conclusions live only in memory.
 
 > Criterion: Delete all memory layers. If the next agent picks up using only repo markdown → **pass**.
 
@@ -199,3 +199,4 @@ This project follows the [agents.md](https://agents.md/) open standard.
 Key inspirations:
 - [netresearch/agent-rules-skill](https://github.com/netresearch/agent-rules-skill) — Dual license structure, README convention, thin pointer approach
 - [breezewish/CodexPotter](https://github.com/breezewish/CodexPotter) — Cross-session file memory (STATUS.md), new agent onboarding ritual, task delegation phrasing inspiration
+- [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) — Lifecycle hook-driven workflow, completion gate, session recovery patterns
