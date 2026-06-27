@@ -49,7 +49,7 @@ Four core principles:
 3. Copy `assets/AGENTS.md` to the project root and fill in user-provided info.
    - **Placeholder rule (important)**: Fill directly when the user gives explicit info. For info not provided, **prefer reasonable defaults** (inferred from the project topic) and briefly note "default, editable". Only leave `【TODO】` for **truly user-specific details that can't be reasonably inferred** (e.g., specific DOIs, passwords, account names). Criterion: the fewer `【TODO】` in AGENTS.md the better — ideally zero.
 4. Copy corresponding thin-pointer files (CLAUDE.md, GEMINI.md, copilot-instructions.md, etc.) for the tools the user selected — all content is "see AGENTS.md". For Cursor users, recommend `.cursor/rules/multi-agent.mdc` (modern format), with `.cursorrules` as legacy fallback. **Don't generate files for unselected tools**.
-5. Create `docs/task_plan_<topic>.md` (copy from `assets/task_plan_template.md`).
+5. Create `docs/task_plan_<topic>.md` (copy from `assets/task_plan_template.md`). **Each task card carries a built-in `📋 Dispatch prompt (copy-paste ready)` block at the end — fill in the card's fields so the user can copy it straight to any agent for a cold-start run, without re-writing the delegation wording each time. Fill this in when you create the card.**
 6. **Derive dataset directories**: Split by data source type — one directory per source (e.g., user says "MODIS + Landsat" → create `MODIS/` and `Landsat/`; user says "survey + field measurements" → create `survey/` and `field_measurements/`). Place `source.txt` (from `assets/source.txt`) in each dataset directory. Skip if the project has no clear data sources.
 7. **Organize code**: Create `scripts/` directory + `scripts/README.md` (copy from `assets/scripts_README.md`). List any existing scripts the user has (if any), or leave empty for later agents to fill. Add the "scripts don't scatter in root" rule to AGENTS.md §5.
 8. Create `STATUS.md` (copy from `assets/STATUS.md`) — empty template; the first agent fills it on completion.
@@ -168,6 +168,8 @@ Pre-delivery self-check: [conservation/bounds/count/magnitude/units…, check of
 The template's core value: a new agent **immediately knows what to read, what not to touch, where to output, and where to log issues** on cold start. The "Known pitfalls" and "Self-check" fields are **battle-verified critical additions** — they guide agents to self-intercept common error types before reporting completion, dramatically reducing defect rates.
 
 For critical tasks affecting paper conclusions or downstream pipelines, append the "Independent Review" instruction (see advanced example in the template).
+
+> **Ship the dispatch prompt with the card (recommended)**: don't make the user re-type this wording every time — **each task card embeds a pre-filled `📋 Dispatch prompt (copy-paste ready)` block at the end** (see `assets/task_plan_template.md`, end of T1). Fill the goal / boundaries / inputs-outputs / known pitfalls / self-check / shutdown when you create the card, so delegating is just copy-paste to any agent (across tools and skills), zero on-the-fly authoring. `delegation_template.md` is then only a field-meaning reference.
 
 ## Advanced Sections (Enable on Demand, see references/advanced.md)
 

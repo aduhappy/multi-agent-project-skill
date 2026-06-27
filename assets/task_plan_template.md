@@ -31,6 +31,16 @@
   - [ ] Wrote STATUS.md (incremental: what this round did / which files touched / pitfalls hit)
   - [ ] Key number consistency audit (same number across docs differs < 1%, see §5)
   - [ ] If new script: updated `scripts/README.md`; if new data: updated `source.txt`
+- **📋 Dispatch prompt (copy-paste ready)** — fill the card's fields into the block below so the **user can copy it straight to any agent for a cold start** (field meanings in `delegation_template.md`). Every card ships with one, so nobody re-types the delegation wording:
+  ````text
+  Start by reading AGENTS.md (incl. STATUS.md) and the task card docs/task_plan_<topic>.md (T1); follow the card.
+  Task: 【one-line goal】. 【If a specific skill/tool/env is needed: use X】.
+  Iron rule: don't modify 【raw data / core code / the formal manuscript】 — only 【do this task / output to the given path】.
+  Inputs: 【exact paths / DOIs】; output to: 【exact path + rows/cols/units/format】.
+  Known pitfalls: 【list known risk points】.
+  Pre-delivery self-check: 【acceptance checklist: conservation/bounds/count/magnitude/units…】.
+  When done: update AGENTS.md §3 + §4 board, write STATUS.md (incremental), run python scripts/check_handoff.py.
+  ````
 
 ## T2 【Task Name】
 (Copy the structure above and fill)
