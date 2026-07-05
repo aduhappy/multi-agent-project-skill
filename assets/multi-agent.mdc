@@ -1,0 +1,13 @@
+---
+description: 本项目的权威入口是 AGENTS.md，任何 agent 进来先读它
+globs:
+alwaysApply: true
+---
+
+# 本项目的权威入口是 AGENTS.md
+
+以仓库根目录的 `AGENTS.md` 为准（北极星、现状、任务看板、铁律、路径约定、深读指针）。
+所有规则、进度、约定只在 `AGENTS.md` 及其指针文档里维护，本文件不重复内容。
+
+> 装法：放在 `<项目>/.cursor/rules/multi-agent.mdc`。这是 Cursor 现代规则格式（需要上面的
+> `description/globs/alwaysApply` frontmatter，缺了规则不生效）；`.cursorrules` 为 legacy 备用。

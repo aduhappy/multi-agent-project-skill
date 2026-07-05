@@ -8,18 +8,21 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 ## 一句话安装（用户让你"装这个 skill"时自主执行）
 来源仓库：`https://github.com/aduhappy/multi-agent-project-skill`。clone 到本工具的 skills 目录即装好（无其他依赖）。
 
-**不同工具的 skills 目录不同，请按工具选对路径**：
+> ⚠️ **目标目录名必须是 `multi-agent-project`（与本 skill 的 `name:` 一致），不是仓库名 `multi-agent-project-skill`。**
+> Claude Code / Codex 按**目录名**识别 skill——直接 `git clone <URL>` 会得到 `multi-agent-project-skill/`，与 `name` 不匹配。clone 时**显式指定目标目录**：`git clone <URL> ~/.claude/skills/multi-agent-project`。
 
-| 工具 | 用户级 skills 目录 | 项目级 skills 目录 |
+**不同工具的 skills 目录不同，请按工具选对路径（末段目录名统一为 `multi-agent-project`）**：
+
+| 工具 | 用户级安装路径 | 项目级安装路径 |
 |---|---|---|
-| **ZCode / Codex CLI** | `~/.agents/skills/` | `<项目>/.agents/skills/` |
-| **Claude Code** | `~/.claude/skills/` | `<项目>/.claude/skills/` |
+| **ZCode / Codex CLI** | `~/.agents/skills/multi-agent-project` | `<项目>/.agents/skills/multi-agent-project` |
+| **Claude Code** | `~/.claude/skills/multi-agent-project` | `<项目>/.claude/skills/multi-agent-project` |
 | **Cursor** | N/A（用 rules） | `.cursor/rules/`（现代格式）或 `.cursorrules`（legacy）|
 
 通用原则：
 - Windows 下 `~` = `%USERPROFILE%`。
 - 用户级 vs 项目级拿不准时默认**用户级**（装一次处处可用）。
-- 目录不存在先创建再 clone。clone 完告诉用户**新开一个会话**即可触发本 skill。
+- 目录不存在先创建再 clone；clone 时把目标目录名钉成 `multi-agent-project`。clone 完告诉用户**新开一个会话**即可触发本 skill。
 
 ## 这技能干嘛
 在项目根目录生成一套**软件无关的纯 Markdown 协同骨架**——一个权威入口 + 若干薄指针 + 自包含任务卡 + 收工规矩。换 Claude / Cursor / Gemini / ZCode / Copilot 任何一个，agent 进来读同一份入口就能接上前任工作，不丢上下文、不互相覆盖。
@@ -42,14 +45,14 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 2. 加问一条**硬约束清单**："列出本领域'不可混用'的维度（口径/单位/坐标系/分辨率/时期/林龄分层等）。写成硬规则，后续所有 agent 必须遵守。"——这是最常被忽略但一错就全错的铁律。
 3. 从 `assets/` 复制 `AGENTS.md` 到根目录，填入用户给的内容。
    - **占位符规则（重要）**：用户明确给的信息直接填；用户没给的，**优先给合理默认值**（基于项目主题推断）并简短标注"默认值，可改"；**只有"用户特有的、没法合理推断"的细节**（如具体 DOI、密码、账号）才留 `【待填】`。判据：AGENTS.md 正文里 `【待填】` 越少越好，理想是 0 个。
-4. 按用户勾选的工具，复制对应薄指针文件（CLAUDE.md / GEMINI.md / copilot-instructions.md 等），内容统一是"以 AGENTS.md 为准"；Cursor 用户推荐用 `.cursor/rules/multi-agent.mdc`（现代格式），`.cursorrules` 为 legacy 备用。**用户没勾的工具不要生成**。
+4. 按用户勾选的工具，复制对应薄指针文件（CLAUDE.md / GEMINI.md / copilot-instructions.md 等），内容统一是"以 AGENTS.md 为准"；Cursor 用户推荐用 `.cursor/rules/multi-agent.mdc`（现代格式，从 `assets/multi-agent.mdc` 复制——它带 `description/globs/alwaysApply` frontmatter，缺了规则不生效），`.cursorrules` 为 legacy 备用。**用户没勾的工具不要生成**。
 5. 建 `文档/任务规划_<主题>.md`（从 `assets/任务规划_模板.md` 复制）。如果项目有多个任务卡，同时拷入 `assets/任务卡_README.md`（任务卡目录索引模板，列依赖链和当前状态）。**每张任务卡末尾自带『📋 派发提示词（复制即用）』块——把卡里字段填进去，用户复制即可贴给任何 agent 冷启动执行，不用每次重写委派话术。建卡时顺手填好这段。**
 6. （可选）按需建：`文档/委派任务模板.md`（从 `assets/委派任务模板.md` 复制，给主控 agent 派活用）、`文档/决策记录/`（存放 ADR）、`文档/词汇表.md`（项目术语）。**注意**：这些是可选模板，小项目跳过，别让入口变臃肿。
-6. **推导数据集目录**：从用户描述的数据源拆分——每类数据一个目录（例：用户说"MODIS + Landsat"→ 建 `MODIS/` 和 `Landsat/` 两个目录；用户说"问卷 + 实测"→ 建 `问卷/` 和 `实测/`）。每个数据集目录放 `来源.txt`（从 `assets/来源.txt` 复制）。没明确数据源的项目可跳过这步。
-7. **代码归位**：建 `scripts/` 目录 + `scripts/README.md`（从 `assets/scripts_README.md` 复制）。把用户已有的脚本列表填进去（如果有），或留空等后续 agent 填充。**同时拷入 `check_handoff.py`**（从 `assets/check_handoff.py` 复制）——收工交接自检脚本，agent 每次收工跑 `python scripts/check_handoff.py` 验证 §3/§4/STATUS 已更新。在 AGENTS.md §5 铁律里约定"脚本不散落根目录"。
-8. 建 `STATUS.md`（从 `assets/STATUS.md` 复制）——空模板，第一个 agent 收工时填**增量 handoff**（本 agent 做了什么/动了哪些文件/踩了什么坑）。
-9. 把用户的环境、约束写成 §铁律、§路径约定。
-10. 跑完后告诉用户：骨架生成了哪些文件、有哪些"默认值"需要他确认、有哪些 `【待填】` 需要他补。
+7. **推导数据集目录**：从用户描述的数据源拆分——每类数据一个目录（例：用户说"MODIS + Landsat"→ 建 `MODIS/` 和 `Landsat/` 两个目录；用户说"问卷 + 实测"→ 建 `问卷/` 和 `实测/`）。每个数据集目录放 `来源.txt`（从 `assets/来源.txt` 复制）。没明确数据源的项目可跳过这步。
+8. **代码归位**：建 `scripts/` 目录 + `scripts/README.md`（从 `assets/scripts_README.md` 复制）。把用户已有的脚本列表填进去（如果有），或留空等后续 agent 填充。**同时拷入 `check_handoff.py`**（从 `assets/check_handoff.py` 复制）——收工交接自检脚本，agent 每次收工跑 `python scripts/check_handoff.py` 验证 §3/§4/STATUS 已更新。在 AGENTS.md §5 铁律里约定"脚本不散落根目录"。
+9. 建 `STATUS.md`（从 `assets/STATUS.md` 复制）——空模板，第一个 agent 收工时填**增量 handoff**（本 agent 做了什么/动了哪些文件/踩了什么坑）。
+10. 把用户的环境、约束写成 §铁律、§路径约定。
+11. 跑完后告诉用户：骨架生成了哪些文件、有哪些"默认值"需要他确认、有哪些 `【待填】` 需要他补。
 
 ### 模式 B：诊断已有项目
 
@@ -104,7 +107,7 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 
 1. **纯 Markdown + 相对路径 + 标准文件名**——别用某软件专属语法、别硬编码绝对路径。
 2. **数据带 `来源.txt`**（DOI/URL/下载日期/口径/单位/已知问题）——换人换 agent 都能溯源。
-3. **收工规矩写进铁律**——每个 agent 退出前更新 §现在在哪 + §任务看板 + 写/更新 `STATUS.md`（**增量 handoff**：本 agent 这一轮做了什么、动了哪些文件、踩了什么坑，不重复 §3 的全量快照）。**收工时跑 `python scripts/check_handoff.py` 自检**——验证 §3 日期新鲜、TL;DR 已填、STATUS.md 非模板、STATUS 日期 ≥ §3 日期、薄指针存在；另含两条 advisory（决策登记表是否存在、多脚本口径常量是否漂移）。全过才算交接合格。
+3. **收工规矩写进铁律**——每个 agent 退出前更新 §现在在哪 + §任务看板 + 写/更新 `STATUS.md`（**增量 handoff**：本 agent 这一轮做了什么、动了哪些文件、踩了什么坑，不重复 §3 的全量快照）。**收工时跑 `python scripts/check_handoff.py` 自检**——验证 §3 日期新鲜（老项目可 `--days N` 放宽）、TL;DR 已填、STATUS.md 非模板、STATUS 日期 ≥ §3 日期、§4 看板存在、薄指针存在（认 `.cursor/rules/*.mdc`）；另含三条 advisory（决策登记表是否存在、多脚本口径常量是否漂移、入口/STATUS 是否体积失控）。脚本已强制 UTF-8 输出，中文 Windows 管道/重定向不再崩。全过才算交接合格。
 4. **路径纪律**——"大文件进工作盘、小产物回仓库""复制不剪切，别动别人正在跑的路径"。
 5. **新 agent（含子 agent）进门第一件事**——读完 AGENTS.md（含 STATUS.md）再动手，不靠对话历史、不凭记忆乱猜。**STATUS.md 会越长越没人读全**——所以任何具约束力的决策（口径/排除清单/选定参数）必须上浮到 AGENTS.md §3 或**决策登记表**这层**有界、必读**的位置，别只躺在 STATUS 的长叙事里。取数/建模/复现前先查这层，别去信某个脚本里的硬编码。
 6. **关键数字与口径参数单一来源、防漂移**——关键数字（均值/百分比/面积等）只在 STATUS.md 或 AGENTS.md §3 一处写定，别处只引用不复述。**口径参数/样本集/排除清单（用哪些点、剔哪些、阈值多少）同理：抽进唯一的 config（`config/参数.yaml` 或一张权威表），所有脚本读它、严禁在多个脚本里各自硬编码**——两个脚本对同一集合编码不一致，是最隐蔽的接力事故源（自检看不出、格式检查也看不出）。收工前核对所有文档**与脚本**间一致性，同一数字差 1% 以上、或同一集合成员不一致，即视为 bug，必须先对齐再交。

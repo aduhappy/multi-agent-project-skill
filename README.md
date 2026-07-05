@@ -105,30 +105,30 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 - `assets/任务规划_模板.md` → 你的项目 `文档/任务规划_<主题>.md`
 - `assets/来源.txt` → 各数据集目录
 
-> ⚠️ **中文文件名注意**：模板里 `任务规划_模板.md`、`委派任务模板.md`、`来源.txt` 含中文名。在部分 CI/工具/编码下可能出现路径问题（URL 编码不一致等）。如果你的 toolchain 对此挑剔，重命名为 ASCII 文件名（如 `task_plan.md`、`delegation_template.md`、`source.txt`）并更新 AGENTS.md §6 的指针即可。内容不受影响。
+> ⚠️ **中文文件名注意**：模板里 `任务规划_模板.md`、`委派任务模板.md`、`来源.txt` 含中文名。在部分 CI/工具/编码下可能出现路径问题（URL 编码不一致等）。如果你的 toolchain 对此挑剔，在**你自己的项目里**改用 ASCII 文件名（如 `task_plan.md`、`delegation.md`、`source.txt`）并更新 AGENTS.md §6 的指针即可。内容不受影响。（注：仓库 `assets/` 里的 `*_EN` / `*_template` 英文件目前是"待更新"占位，别拿它们当模板。）
 
 ## 生成的文件骨架
 
 ```
 <项目根>/
-├── AGENTS.md                          ← 唯一权威入口（七板块）
-	├── STATUS.md                          ← 增量 handoff（本轮做了什么/动了哪些文件/踩了什么坑）
+├── AGENTS.md                          ← 唯一权威入口（7 板块 + TL;DR + 路径约定）
+├── STATUS.md                          ← 增量 handoff（本轮做了什么/动了哪些文件/踩了什么坑）
 ├── CLAUDE.md                          ← 薄指针 → "以 AGENTS.md 为准"
 ├── GEMINI.md                          ← 薄指针
-├── .cursorrules                       ← 薄指针（Cursor）
+├── .cursor/rules/multi-agent.mdc      ← 薄指针（Cursor 现代格式，.cursorrules 为 legacy）
 ├── .github/copilot-instructions.md    ← 薄指针（Copilot）
-	├── 文档/
-	│   ├── 任务规划_<主题>.md             ← 自包含任务卡
-	│   ├── 任务卡_README.md               ← 任务卡目录索引（依赖链 + 状态表）
-	│   ├── 决策记录/                      ← 关键技术决策（ADR）
-	│   └── 词汇表.md                      ← 项目术语
+├── 文档/
+│   ├── 任务规划_<主题>.md             ← 自包含任务卡
+│   ├── 任务卡_README.md               ← 任务卡目录索引（依赖链 + 状态表）
+│   ├── 决策记录/                      ← 关键技术决策（ADR）
+│   └── 词汇表.md                      ← 项目术语
 ├── <数据集名>/
 │   ├── 来源.txt                       ← DOI/URL/日期/口径
 │   └── ...
-	├── scripts/                           ← 代码归位（不散落根目录）
-	│   ├── README.md                      ← 脚本索引：干嘛/输入/输出/作者
-	│   └── check_handoff.py               ← 收工交接自检脚本
-	└── 进度日志.md                        ← 带日期戳的变更流水
+├── scripts/                           ← 代码归位（不散落根目录）
+│   ├── README.md                      ← 脚本索引：干嘛/输入/输出/作者
+│   └── check_handoff.py               ← 收工交接自检脚本
+└── 进度日志.md                        ← 带日期戳的变更流水
 ```
 
 ## AGENTS.md 的板块（顺序即优先级）

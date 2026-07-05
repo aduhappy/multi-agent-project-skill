@@ -9,6 +9,12 @@
 
 > **一句话**：河床演变对桥梁基础冲刷的影响评估——基于多期 DEM 差分 + 水文模型。目标投《水利学报》或同级别中文期刊。别耽误主线的桥梁安全评估截止日期。
 
+> ⚡ **TL;DR（进门速读，3 行就够，细节往下翻）**
+> - **当前阶段**：T4 HEC-RAS 建模进行中（模型已建好，待率定）
+> - **下一步**：拿到实测断面数据后率定 HEC-RAS，跑 `scripts/hecras_calibrate.py`
+> - **阻塞**：缺桥址段 2019 年实测断面，已联系管理所，预计 6-20 前到
+> （本块每次收工更新；完整状态见 §3、任务看板见 §4）
+
 > ✅ **进门仪式**：读完本文件后，确认你已理解——①北极星（§1）②当前阶段和阻塞（§3）③受哪些铁律约束（§5–5.5）。之后每个子 agent 进入同样先读本文件再动手。
 
 ## 1. 北极星 / 当前故事（2026-06-10 与导师沟通定）
@@ -41,7 +47,7 @@
 - UAV 建模用 Metashape env（`D:\software\conda\envs\metashape\python.exe`），水文分析用 `hydrology` env。**两套环境不可混用**（GIS 相关 DLL 冲突）。
 - 中文图内 μ、±、² 等字符用 mathtext 渲染，SimHei 缺这些字形会显方框。
 - **代码归位**：Python 脚本放 `scripts/`，每加一个同步更新 `scripts/README.md`。R 脚本放 `scripts/r/`。
-- **收工规矩**：每个 agent 结束时更新 §3/§4 + 更新 `STATUS.md`。
+- **收工规矩**：每个 agent 结束时更新 §3/§4 + 更新 `STATUS.md`（增量），并跑 `python scripts/check_handoff.py` 自检，全过才算交接合格。
 
 ## 5.5 路径约定（重要：避免 OneDrive 同步爆炸）
 项目根 `F:\research\bridge_scour` 在 OneDrive 里同步。大文件不进根目录：

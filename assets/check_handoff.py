@@ -13,6 +13,9 @@ check_handoff.py — 收工交接自检脚本（multi-agent-project skill 配套
     # 从任何位置运行，自动用 cwd
     python check_handoff.py
 
+    # 老项目搁置多日后重开，放宽“近 N 天”新鲜度阈值（默认 7）
+    python scripts/check_handoff.py --days 30
+
 检查项（每项 pass/fail，全部 pass 才算交接合格）：
   1. AGENTS.md 存在且非空
   2. AGENTS.md §3 "现在在哪" 有近 7 天内的日期戳（防止收工没更新）
@@ -20,12 +23,17 @@ check_handoff.py — 收工交接自检脚本（multi-agent-project skill 配套
   4. STATUS.md 存在、非空、非模板（有真实 Handoff 日期，不是 YYYY-MM-DD）
   5. STATUS.md 的 Handoff 日期 >= AGENTS.md §3 最近日期（增量不能比累计旧）
   6. 勾选的薄指针文件至少存在一个且指向 AGENTS.md（CLAUDE.md / GEMINI.md / .cursorrules / copilot-instructions.md）
-  7. §4 看板有至少一项已勾选（防止收工后看板全未开始）
+  7. §4 看板存在（存在即 PASS；“有任务却一项没勾”只作 advisory D，不硬 FAIL——全新项目首棒合法）
   8. TL;DR 最新日期 >= §3 最近日期（TL;DR 和 §3 不矛盾）
 
-另有 2 项语义自检（advisory，只警告不判失败）：
+另有 3 项语义自检（advisory，只警告不判失败）：
   A. 决策登记表存在（具约束力的口径/排除清单别只埋在 STATUS 长叙事里）
   B. 多脚本口径漂移检测（同一大写常量集合在不同脚本里成员不一致——H28 类接力事故）
+  C. 入口/交接文件体积失控（AGENTS.md 应 1–2 屏、STATUS.md 应只记增量）
+
+注：检查 3（TL;DR 占位符）只认 【待填/【TODO/TODO】/例：/e.g. 记号，不裸查“例”（避免误杀“比例/案例”）。
+    检查 4/6 认 Windows GBK 控制台，脚本已强制 UTF-8 输出，可安全被管道/重定向捕获。
+    --days N 覆盖“近 N 天”新鲜度阈值（默认 7）。
 
 退出码：0 = 全过（含仅 advisory 警告），1 = 有失败项。
 """
@@ -34,10 +42,45 @@ import re
 import sys
 from datetime import datetime, timedelta
 
-# 项目根：命令行参数优先，否则用当前工作目录
-ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.getcwd()
+# Windows 中文环境（GBK 控制台）下，emoji/中文会在管道或重定向时触发 UnicodeEncodeError。
+# agent 跑脚本几乎必然是被捕获输出的场景，所以强制把 stdout/stderr 切到 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    enc = getattr(_stream, "encoding", None)
+    if enc and enc.lower().replace("-", "") not in ("utf8",):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+# 参数解析：位置参数=项目根（默认 cwd）；--days N 覆盖“近 N 天”新鲜度阈值（默认 7）。
+FRESH_DAYS = 7
+_positional = []
+_args = sys.argv[1:]
+_i = 0
+while _i < len(_args):
+    a = _args[_i]
+    if a in ("--days", "-d"):
+        _i += 1
+        if _i < len(_args):
+            try:
+                FRESH_DAYS = int(_args[_i])
+            except ValueError:
+                pass
+    elif a.startswith("--days="):
+        try:
+            FRESH_DAYS = int(a.split("=", 1)[1])
+        except ValueError:
+            pass
+    elif a in ("-h", "--help"):
+        print(__doc__)
+        sys.exit(0)
+    else:
+        _positional.append(a)
+    _i += 1
+
+ROOT = os.path.abspath(_positional[0]) if _positional else os.getcwd()
 TODAY = datetime.now()
-RECENT = TODAY - timedelta(days=7)
+RECENT = TODAY - timedelta(days=FRESH_DAYS)
 
 PASS = "✅ PASS"
 FAIL = "❌ FAIL"
@@ -62,9 +105,8 @@ check("AGENTS.md 存在且非空", len(agents_text.strip()) > 100,
 # 只搜 §3 节内日期，避免被参考文献/来源.txt 等处的日期污染
 sec3 = re.search(r"(?:^## 3\.|^## 现在在哪|^## Where We Are Now).*?(?=^## )", agents_text, re.MULTILINE | re.DOTALL)
 if not sec3:
-    sec3 = re.search(r"## 3\.", agents_text, re.MULTILINE)
-if not sec3:
-    sec3 = re.search(r"现在在哪|Where We Are Now", agents_text)
+    # fallback：抓 §3 标题到文末（末节没有后继 `## ` 时上面的 lookahead 会失配）
+    sec3 = re.search(r"(?:^## 3\.|^## 现在在哪|^## Where We Are Now).*", agents_text, re.MULTILINE | re.DOTALL)
 
 dates_in_agents = re.findall(r"20\d{2}-\d{2}-\d{2}", sec3.group(0) if sec3 else "")
 recent_in_agents = False
@@ -79,9 +121,9 @@ if dates_in_agents:
                 recent_in_agents = True
         except ValueError:
             pass
-check("§3 有近 7 天日期戳", recent_in_agents,
-      f"最近日期 {latest_agents_date} 超过 7 天，可能收工没更新 AGENTS.md" if latest_agents_date and not recent_in_agents
-      else (f"最近日期 {latest_agents_date}" if latest_agents_date else "AGENTS.md 里没找到任何日期"))
+check(f"§3 有近 {FRESH_DAYS} 天日期戳", recent_in_agents,
+      f"最近日期 {latest_agents_date:%Y-%m-%d} 超过 {FRESH_DAYS} 天，可能收工没更新 AGENTS.md（老项目重开可加 --days）" if latest_agents_date and not recent_in_agents
+      else (f"最近日期 {latest_agents_date:%Y-%m-%d}" if latest_agents_date else "AGENTS.md 里没找到任何日期"))
 
 
 # ---------- 3. TL;DR 块不是占位符 ----------
@@ -90,8 +132,11 @@ tldr_section = re.search(r"⚡.*?(?:当前阶段|Current stage).*?(?=✅|---)", 
 tldr_ok = False
 if tldr_section:
     blob = tldr_section.group(0)
-    # 占位符判定：含【待填 或 TODO 或 例
-    tldr_ok = "【待填" not in blob and "TODO" not in blob and "例" not in blob and "e.g." not in blob.lower()
+    # 占位符判定：只认模板真正的占位记号。
+    # 不能裸查“例”——“比例/案例/示例/惯例”都含“例”会误杀真实内容（已实测踩坑）。
+    # 模板里的示例统一写成「例：」，所以用「例：」而非「例」来匹配。
+    tldr_ok = ("【待填" not in blob and "【TODO" not in blob
+               and "TODO】" not in blob and "例：" not in blob and "e.g." not in blob.lower())
 check("AGENTS.md TL;DR 块已填（非占位符）", tldr_ok,
       "TL;DR 块还含【待填/TODO，收工时应更新当前阶段" if not tldr_ok else "已填")
 
@@ -136,6 +181,12 @@ check("STATUS.md 日期 >= AGENTS.md §3 日期", cross_ok, cross_detail)
 # ---------- 6. 薄指针文件至少一个存在且指向 AGENTS.md ----------
 thin_pointers = ["CLAUDE.md", "GEMINI.md", ".cursorrules",
                  ".github/copilot-instructions.md"]
+# Cursor 现代格式：.cursor/rules/ 下任意 .mdc 都算薄指针（SKILL 推荐这种，别只认 legacy .cursorrules）
+cursor_rules_dir = os.path.join(ROOT, ".cursor", "rules")
+if os.path.isdir(cursor_rules_dir):
+    for fn in sorted(os.listdir(cursor_rules_dir)):
+        if fn.endswith(".mdc"):
+            thin_pointers.append(os.path.join(".cursor", "rules", fn))
 found_pointer = False
 pointer_detail = "没找到任何薄指针文件"
 for p in thin_pointers:
@@ -152,17 +203,19 @@ for p in thin_pointers:
 check("薄指针文件存在且指向 AGENTS.md", found_pointer, pointer_detail)
 
 
-# ---------- 7. §4 看板有已勾选项 ----------
+# ---------- 7. §4 看板存在（存在即 PASS；“有任务却一项没勾”只作 advisory）----------
+# 不硬性要求“至少一项已勾选”——全新项目第一棒合法地全未勾选，硬 FAIL 是误报。
 sec4 = re.search(r"(?:^## 4\.|^## 下一步任务看板|^## Next Task Board|^## 任务看板).*?(?=^## )", agents_text, re.MULTILINE | re.DOTALL)
-sec4_has_checked = False
-sec4_detail = "未找到 §4 看板"
+if not sec4:
+    sec4 = re.search(r"(?:^## 4\.|^## 下一步任务看板|^## Next Task Board|^## 任务看板).*", agents_text, re.MULTILINE | re.DOTALL)
+sec4_present = bool(sec4)
+sec4_checked = sec4_unchecked = 0
 if sec4:
     sec4_text = sec4.group(0)
-    checked = re.findall(r"\[x\]", sec4_text)
-    unchecked = re.findall(r"\[\s?\]", sec4_text)
-    sec4_has_checked = len(checked) >= 1
-    sec4_detail = f"§4 看板：{len(checked)} 已完成 / {len(unchecked)} 未完成"
-check("§4 看板有至少一项已勾选", sec4_has_checked, sec4_detail)
+    sec4_checked = len(re.findall(r"\[x\]", sec4_text, re.IGNORECASE))
+    sec4_unchecked = len(re.findall(r"\[\s?\]", sec4_text))
+check("§4 看板存在", sec4_present,
+      (f"§4 看板：{sec4_checked} 已完成 / {sec4_unchecked} 未完成" if sec4_present else "未找到 §4 看板"))
 
 
 # ---------- 8. TL;DR 最新日期 >= §3 最近日期（TL;DR 和 §3 不矛盾） ----------
@@ -233,6 +286,27 @@ if os.path.isdir(scripts_dir):
                 f"{list(v)} = {{{', '.join(mem)}}}" for mem, v in variants.items())
             warn(f"口径漂移：常量 {name} 在多脚本里成员不一致",
                  f"{lines} —— 抽进唯一 config 让各脚本读取，并核对决策登记表（见 advanced.md §1c）。")
+
+
+# C. 入口/交接文件体积失控（advisory）——AGENTS.md 该是 1–2 屏必读，STATUS.md 该只记增量。
+#    实测过：入口涨到 60KB、STATUS 涨到 130KB+，就没人读全了，铁律就靠不住了。
+AGENTS_SOFT_LIMIT = 25_000   # ~1–2 屏；超了说明细节没下沉到 §6 指针文档
+STATUS_SOFT_LIMIT = 40_000   # STATUS 只记最近增量；超了说明旧 handoff 没归档到进度日志
+agents_bytes = len(agents_text.encode("utf-8"))
+status_bytes = len(status_text.encode("utf-8"))
+if agents_bytes > AGENTS_SOFT_LIMIT:
+    warn("AGENTS.md 偏大（入口应 1–2 屏）",
+         f"{agents_bytes // 1000}KB > {AGENTS_SOFT_LIMIT // 1000}KB —— 把细节下沉到 §6 指针文档"
+         "（任务规划/决策登记表/进度日志），入口只留必读的北极星+现状+铁律。")
+if status_bytes > STATUS_SOFT_LIMIT:
+    warn("STATUS.md 偏大（应只记最近增量）",
+         f"{status_bytes // 1000}KB > {STATUS_SOFT_LIMIT // 1000}KB —— 旧 handoff 归档到 `进度日志.md`，"
+         "STATUS 只留最近一两次交接；仍有效的坑上浮到 AGENTS.md §5 铁律。")
+
+# D. 看板有任务却一项没勾（advisory）——刚搭骨架属正常，否则可能是收工忘了更新看板。
+if sec4_present and (sec4_checked + sec4_unchecked) > 0 and sec4_checked == 0:
+    warn("§4 看板全未勾选",
+         "有任务但一项都没勾——若是刚搭骨架属正常；否则收工时记得把完成项勾成 [x]。")
 
 
 # ---------- 汇总 ----------

@@ -113,7 +113,7 @@ agent 收工时（除更新 AGENTS.md 外）写/更新 **`STATUS.md`**（放在�
 在 AGENTS.md §3 "现在在哪"里放一行指针："`→ 本轮增量 handoff 见 STATUS.md`"，§3 只保留最新 1-2 条累计状态，细节下沉。
 配合记忆层（Cursor memory / Claude memory）用，但 **STATUS.md 是真相源**——删光记忆也能接上。
 
-**收工自检脚本**：项目根跑 `python scripts/check_handoff.py`，自动验证 §3 日期新鲜、TL;DR 已填、STATUS.md 非模板、STATUS 日期 ≥ §3 日期、薄指针存在；另含两条 advisory（决策登记表是否存在、`scripts/` 下同名大写常量集合是否在多脚本里成员不一致——H28 类口径漂移）。全过才算交接合格，避免"收工规矩写了但 agent 没执行"。
+**收工自检脚本**：项目根跑 `python scripts/check_handoff.py`，自动验证 §3 日期新鲜（`--days N` 可放宽老项目阈值）、TL;DR 已填、STATUS.md 非模板、STATUS 日期 ≥ §3 日期、§4 看板存在、薄指针存在（含 Cursor `.cursor/rules/*.mdc`）；另含三条 advisory（① 决策登记表是否存在 ② `scripts/` 下同名大写常量集合是否在多脚本里成员不一致——H28 类口径漂移 ③ AGENTS.md/STATUS.md 是否体积失控——入口该 1–2 屏、STATUS 该只记增量）。脚本强制 UTF-8 输出，中文 Windows 下被管道/重定向捕获也不会崩。全过才算交接合格，避免"收工规矩写了但 agent 没执行"。
 
 ## 6. 命名约定 + 幂等性
 - 输出文件命名带版本/日期/坐标系：`<output>_v1_20260615.tif`、`Fig_<topic>_<var>.png`，避免多 agent 产出同名覆盖。
