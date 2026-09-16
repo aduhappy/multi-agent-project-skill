@@ -44,7 +44,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 ## 这是什么
 
-一个 [Agent Skill](https://agentskills.io/)：在项目根目录生成一套**软件无关的纯 Markdown 协同骨架**。
+一个 [Agent Skill](https://agentskills.io/)：在项目根目录生成一套**软件无关的纯 Markdown 协同骨架**。支持单线 `line` 与多线根索引 `index` 两种 scope；根索引只导航，线级入口才承载详细状态。
 
 设计目标——**真相只有一份**：`AGENTS.md` 是唯一权威入口，其他工具的约定文件（`CLAUDE.md` / `GEMINI.md` / `.cursorrules` / `.github/copilot-instructions.md`）全是 3 行薄指针，指向 `AGENTS.md`。换任何 AI 工具，agent 都读同一份入口，不丢上下文、不互相覆盖。
 
@@ -70,12 +70,13 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 - **独立复核阀门**——"别信自检"，关键产物必须主控/第三 agent 抽验后才放行下一棒
 - **关键数字与口径参数防漂移**——同一数字只在一处写定；口径/样本集抽进唯一 config，别在多脚本各自硬编码；收工核对一致性
 - **坏产物与被取代脚本退役**——错产物、被决策取代的旧脚本立即标作废，静默复用比没产出更致命
-- **委派模板含已知坑+自查清单**——引导 agent 在报完成前自拦截常见错误类型
+- **派发提示词含已知坑+自查清单**——随任务卡走，引导 agent 在报完成前自拦截常见错误类型
 - **AGENTS.md 顶部 TL;DR 块**——3 行速读（当前阶段/下一步/阻塞），新 agent 不用读全文就知状态
 - **STATUS.md 增量 handoff**——只记"本轮做了什么/动了哪些文件/踩了什么坑"，和 AGENTS.md §3 累计快照不重叠
 - **check_handoff.py 收工自检**——脚本验证 §3 日期新鲜/TL;DR 已填/STATUS 非模板/薄指针存在，全过才算交接合格
 - **任务卡目录索引**——依赖链 + 当前状态表，新 agent 知道先做哪张卡
-
+- **双提示词与身份留痕**——关键卡同时带执行方和复核方提示词，写明谁（工具/模型/家族）做的；未知写 `UNKNOWN`，不算通过
+- **根/线 scope**——多线根只做索引，线级入口自包含；`check_handoff.py --scope index|line` 分开检查
 ## 何时触发
 
 说任一句都会触发：
@@ -99,13 +100,18 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 ## 只要模板文件，不要 skill
 
-不想装成 skill、只想要骨架文件？直接复制 `assets/` 目录下的文件到你的项目根：
-- `assets/AGENTS.md` → 你的项目 `AGENTS.md`
-- `assets/CLAUDE.md` → 你的项目 `CLAUDE.md`
-- `assets/任务规划_模板.md` → 你的项目 `文档/任务规划_<主题>.md`
+不想装成 skill、只想要骨架文件？直接复制 `assets/` 目录下的文件到你的项目：
+- 单线项目：`assets/AGENTS.md` → 线目录 `AGENTS.md`
+- 多线项目根：`assets/ROOT_AGENTS.md` → 课题根 `AGENTS.md`
+- 多线项目每条线：`assets/AGENTS.md` → `<线目录>/AGENTS.md`
+- `assets/任务规划_模板.md` → 任务卡（关键卡含执行/复核双提示词）
 - `assets/来源.txt` → 各数据集目录
+- `assets/check_handoff.py` → 项目 `scripts/check_handoff.py`
 
-> ⚠️ **中文文件名注意**：模板里 `任务规划_模板.md`、`委派任务模板.md`、`来源.txt` 含中文名。在部分 CI/工具/编码下可能出现路径问题（URL 编码不一致等）。如果你的 toolchain 对此挑剔，在**你自己的项目里**改用 ASCII 文件名（如 `task_plan.md`、`delegation.md`、`source.txt`）并更新 AGENTS.md §6 的指针即可。内容不受影响。（注：仓库 `assets/` 里的 `*_EN` / `*_template` 英文件目前是"待更新"占位，别拿它们当模板。）
+> ⚠️ 中文文件名注意：如果你的 toolchain 对中文路径挑剔，在**你自己的项目里**改用 ASCII 文件名并更新线级入口指针；不要改变本 skill 的安装目录 `multi-agent-project`。
+
+
+`check_handoff.py` 收工自检：线级运行 `python ../scripts/check_handoff.py`（脚本在线目录里就去掉 `../`），查 §3 日期新鲜、TL;DR 已填、STATUS 非模板、STATUS 日期 ≥ §3、§4 看板、薄指针；另有 4 条只提示不阻断的提醒（决策登记表、多脚本常量漂移、文件体积、看板全未勾）。多线课题的根目录用 `--scope index` 查索引。项目里若有不认识 `--scope` 的旧副本，先整体替换成本版。技能仓库自身运行 `python tests/test_skill.py`。
 
 ## 生成的文件骨架
 
@@ -118,8 +124,9 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 ├── .cursor/rules/multi-agent.mdc      ← 薄指针（Cursor 现代格式，.cursorrules 为 legacy）
 ├── .github/copilot-instructions.md    ← 薄指针（Copilot）
 ├── 文档/
-│   ├── 任务规划_<主题>.md             ← 自包含任务卡
-│   ├── 任务卡_README.md               ← 任务卡目录索引（依赖链 + 状态表）
+│   ├── 任务卡/                           ← 新项目推荐；旧项目可暂留平铺任务卡
+│   │   └── T1_<主题>.md                  ← 自包含任务卡
+│   ├── 任务卡_README.md                   ← 任务卡目录索引（依赖链 + 状态表）
 │   ├── 决策记录/                      ← 关键技术决策（ADR）
 │   └── 词汇表.md                      ← 项目术语
 ├── <数据集名>/
@@ -144,9 +151,9 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 6. **深读指针**——细节去哪个文档
 7. **环境/工具**——完整工具路径怎么调、env 锁
 
-> 入口控制在 1–2 屏，每个 agent 都得读完；细节全部外链。完整说明见 [`references/advanced.md`](references/advanced.md)（8 个进阶板块：ADR、词汇表、进度日志、验收具体化、handoff 格式、命名约定、环境锁、数据快照）。
+完整说明见 [`references/advanced.md`](references/advanced.md)（按需启用的决策、词汇表、进度日志、验收、handoff、命名、环境锁、数据快照、复核和数字核对板块）。
 
-## 跨软件能续的七个硬要求
+## 跨软件能续的九个硬要求
 
 1. **纯 Markdown + 相对路径 + 标准文件名**——别用某软件专属语法
 2. **数据带 `来源.txt`**（DOI/URL/日期/口径/单位）——换人换 agent 都能溯源
@@ -154,9 +161,10 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 4. **路径纪律**——"大文件进工作盘、小产物回仓库""复制不剪切"
 5. **新 agent（含子 agent）进门第一件事**——读完 AGENTS.md（含 STATUS.md）再动手；具约束力的决策上浮到**有界必读层**（§3 / 决策登记表），别埋在 STATUS 长叙事里
 6. **关键数字与口径参数单一来源**——数字只在一处写定；**口径/样本集/排除清单抽进唯一 config，所有脚本读它、别在多脚本各自硬编码**；收工核对文档与脚本一致性
-7. **坏产物与被取代脚本一并退役**——错产物标 `_DEPRECATED` + 红字通告 + 看板更新；**被决策取代的旧脚本也加退役注释**，别当活口径钓下家
+7. **坏产物与被取代脚本一并退役**——错产物标 `_DEPRECATED` + 红字通告 + 看板更新；被决策取代的旧脚本也加退役注释。
+8. **谁做的要留痕**——任务卡和 STATUS 写明工具、模型、模型家族和日期；未知写 `UNKNOWN`，不从工具名推断，不算通过
+9. **关键数字换个方法核一遍**——对不上记 `UNKNOWN`，不往下游放
 
-> 新增的 6 和 7 来自实战教训：多 agent 各自改文档会导致数字漂移（同一值差 1%+），坏产物被下游静默复用比没产出更致命。
 
 ## 两层续接（缺一不可）
 

@@ -1,6 +1,6 @@
 # 进阶板块（项目变大时按需启用）
 
-> 核心七板块之外的可选增强。**不要一上来全堆**——小项目用不上，反而让入口变臃肿。
+> 核心板块之外的可选增强。**不要一上来全堆**——小项目用不上，反而让入口变臃肿。
 > 启用时，在 AGENTS.md §6 深读指针里放一行指针即可，主体内容下沉到本文件对应的文档。
 
 ## 1. 决策记录：先有"登记表"，再有"详卡"
@@ -113,7 +113,7 @@ agent 收工时（除更新 AGENTS.md 外）写/更新 **`STATUS.md`**（放在�
 在 AGENTS.md §3 "现在在哪"里放一行指针："`→ 本轮增量 handoff 见 STATUS.md`"，§3 只保留最新 1-2 条累计状态，细节下沉。
 配合记忆层（Cursor memory / Claude memory）用，但 **STATUS.md 是真相源**——删光记忆也能接上。
 
-**收工自检脚本**：项目根跑 `python scripts/check_handoff.py`，自动验证 §3 日期新鲜（`--days N` 可放宽老项目阈值）、TL;DR 已填、STATUS.md 非模板、STATUS 日期 ≥ §3 日期、§4 看板存在、薄指针存在（含 Cursor `.cursor/rules/*.mdc`）；另含四条 advisory（① 决策登记表是否存在 ② `scripts/` 下同名大写常量集合是否在多脚本里成员不一致——H28 类口径漂移 ③ AGENTS.md/STATUS.md 是否体积失控——入口该 1–2 屏、STATUS 该只记增量 ④ §4 看板有任务却一项没勾）。脚本强制 UTF-8 输出，中文 Windows 下被管道/重定向捕获也不会崩。全过才算交接合格，避免"收工规矩写了但 agent 没执行"。
+**收工自检脚本**：`check_handoff.py` 收工自检：线级运行 `python ../scripts/check_handoff.py`（脚本在线目录里就去掉 `../`），查 §3 日期新鲜、TL;DR 已填、STATUS 非模板、STATUS 日期 ≥ §3、§4 看板、薄指针；另有 4 条只提示不阻断的提醒（决策登记表、多脚本常量漂移、文件体积、看板全未勾）。多线课题的根目录用 `--scope index` 查索引。项目里若有不认识 `--scope` 的旧副本，先整体替换成本版。
 
 ## 6. 命名约定 + 幂等性
 - 输出文件命名带版本/日期/坐标系：`<output>_v1_20260615.tif`、`Fig_<topic>_<var>.png`，避免多 agent 产出同名覆盖。
@@ -144,7 +144,7 @@ D:\software\...\condabin\conda.bat env export -n dlcm > environment.yml
 
 ## 9. 给 AI agent 委派任务的标准话术
 
-每次派新 agent 时，用统一格式开头（照 `assets/委派任务模板.md`）——让 agent 知道该读什么、不碰什么、往哪输出、出问题往哪汇报。核心价值：**一次到位，不用事后再纠正**。在 AGENTS.md §6 放一行指针："`委派任务话术模板 → 文档/委派任务模板.md`"。
+每次派新 agent 时，用统一格式开头（照任务卡模板末尾的派发提示词）——让 agent 知道该读什么、不碰什么、往哪输出、出问题往哪汇报。核心价值：**一次到位，不用事后再纠正**。
 
 ## 10. 独立复核协议（Independent Review Protocol）
 
