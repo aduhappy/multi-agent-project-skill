@@ -153,7 +153,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 完整说明见 [`references/advanced.md`](references/advanced.md)（按需启用的决策、词汇表、进度日志、验收、handoff、命名、环境锁、数据快照、复核和数字核对板块）。
 
-## 跨软件能续的九个硬要求
+## 跨软件能续的十个硬要求
 
 1. **纯 Markdown + 相对路径 + 标准文件名**——别用某软件专属语法
 2. **数据带 `来源.txt`**（DOI/URL/日期/口径/单位）——换人换 agent 都能溯源
@@ -164,6 +164,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 7. **坏产物与被取代脚本一并退役**——错产物标 `_DEPRECATED` + 红字通告 + 看板更新；被决策取代的旧脚本也加退役注释。
 8. **谁做的要留痕**——任务卡和 STATUS 写明工具、模型、模型家族和日期；未知写 `UNKNOWN`，不从工具名推断，不算通过
 9. **关键数字换个方法核一遍**——对不上记 `UNKNOWN`，不往下游放
+10. **哈希只记判据用得上的**——交付物、声称未改的输入才记；不给每份日志/快照逐个记哈希
 
 
 ## 两层续接（缺一不可）
