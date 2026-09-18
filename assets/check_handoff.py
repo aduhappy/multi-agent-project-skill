@@ -13,7 +13,7 @@
   H003 §3「现在在哪」有近 N 天的日期
   H004 TL;DR 已填（不是模板占位符）
   H005 STATUS.md 存在、非模板、有真实日期
-  H006 STATUS 的 Handoff 日期 >= §3 最近日期
+  H006 STATUS 最新交接日期 >= §3 最近日期（交接标题＝含 Handoff，或标题以日期开头）
   H007 至少一个薄指针指向 AGENTS.md（没有薄指针也算通过）
   H008 §4 看板存在且有任务行
   H009 TL;DR 日期与 §3 不矛盾（任一方没日期则跳过）
@@ -135,11 +135,14 @@ def line_checks(root: Path, days: int, today: date) -> None:
         len(status.strip()) > 50 and bool(dates(status, today)) and "YYYY-MM-DD" not in status,
         "已填" if status else "missing")
 
-    handoff_heads = "\n".join(
-        line for line in status.splitlines() if re.match(r"^\s*#{1,6}\s+", line) and re.search(r"(?i)handoff", line)
+    # 交接标题：含 Handoff，或标题正文以日期开头（如 “## 2026-09-19 主控：…”）；归档说明等其他标题不算
+    heads = "\n".join(
+        line for line in status.splitlines()
+        if re.match(r"^\s*#{1,6}\s+", line)
+        and (re.search(r"(?i)handoff", line) or re.match(r"^\s*#{1,6}\s+\d{4}-\d{2}-\d{2}", line))
     )
-    status_date = latest(handoff_heads, today) or latest(status, today)
-    add("H006", "STATUS Handoff 日期 >= §3 日期", bool(status_date and sec3_date and status_date >= sec3_date),
+    status_date = latest(heads, today) or latest(status, today)
+    add("H006", "STATUS 最新交接日期 >= §3 日期", bool(status_date and sec3_date and status_date >= sec3_date),
         f"STATUS {status_date} vs §3 {sec3_date}")
 
     pointers = [root / n for n in ("CLAUDE.md", "GEMINI.md", ".cursorrules", ".github/copilot-instructions.md")]
@@ -178,7 +181,7 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
     big = [f"{n} {len(t.encode('utf-8')) // 1000}KB" for n, t, limit in
            (("AGENTS.md", agents, 25_000), ("STATUS.md", status, 40_000)) if len(t.encode("utf-8")) > limit]
     add("A003", "AGENTS ≤25KB、STATUS ≤40KB", not big,
-        ", ".join(big) + ("；旧段原样移到 文档/*_归档_至<日期>.md，入口留指针" if big else ""), True)
+        ", ".join(big) + ("；旧段原样移到 文档/*_归档_至<日期>.md，入口留一行 > 引用（不要写成带日期的标题）" if big else ""), True)
 
     checked = len(re.findall(r"(?m)^\s*[-*]\s*\[[xX]\]", sec4))
     unchecked = len(re.findall(r"(?m)^\s*[-*]\s*\[\s?\]", sec4))

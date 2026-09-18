@@ -54,6 +54,17 @@ def main() -> int:
         rc, out = run(line)
         check(rc == 0, "filled line should pass:\n" + out)
 
+        write(line / "STATUS.md", "# STATUS\n\n## Handoff（2026-09-14）\n- 旧交接。\n\n## 2026-09-15 主控：补一段\n- 本次做了什么：改了看板。\n")
+        rc, out = run(line)
+        check(rc == 0, "newer non-Handoff heading must count for H006:\n" + out)
+        write(line / "STATUS.md", "# STATUS\n\n## Handoff（2026-09-14）\n- 只有旧交接，内容写满五十个字以上，免得被当成模板。本次做了什么：写完初稿。\n")
+        rc, out = run(line)
+        check(rc == 1 and "[H006] ❌" in out, "STATUS older than §3 must fail:\n" + out)
+        write(line / "STATUS.md", "# STATUS\n\n## 归档说明（旧段已移至 2026-09-15 归档文件）\n- 见归档。\n\n## Handoff（2026-09-14）\n- 只有旧交接，内容写满五十个字以上，免得被当成模板。本次做了什么：写完初稿。\n")
+        rc, out = run(line)
+        check(rc == 1 and "[H006] ❌" in out, "archive-note heading must not count as a handoff date:\n" + out)
+        write(line / "STATUS.md", "# STATUS\n\n## Handoff（2026-09-15）\n- 本次做了什么：写完初稿，动了草稿文件，没有阻塞。\n")
+
         rc, out = run(line, "--scope", "index")
         check(rc == 1 and "[I002] ❌" in out, "line misused as index must fail:\n" + out)
         rc, out = run(root)
