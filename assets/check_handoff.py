@@ -177,7 +177,8 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
 
     big = [f"{n} {len(t.encode('utf-8')) // 1000}KB" for n, t, limit in
            (("AGENTS.md", agents, 25_000), ("STATUS.md", status, 40_000)) if len(t.encode("utf-8")) > limit]
-    add("A003", "AGENTS ≤25KB、STATUS ≤40KB", not big, ", ".join(big), True)
+    add("A003", "AGENTS ≤25KB、STATUS ≤40KB", not big,
+        ", ".join(big) + ("；旧段原样移到 文档/*_归档_至<日期>.md，入口留指针" if big else ""), True)
 
     checked = len(re.findall(r"(?m)^\s*[-*]\s*\[[xX]\]", sec4))
     unchecked = len(re.findall(r"(?m)^\s*[-*]\s*\[\s?\]", sec4))
