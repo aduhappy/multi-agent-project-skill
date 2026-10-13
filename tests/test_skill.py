@@ -77,6 +77,14 @@ def main() -> int:
         ).returncode, ""
         check(rc == 1, "stale §3 date must fail")
 
+        card = line / "文档" / "任务卡" / "T2_方法.md"
+        write(card, "# T2 方法\n\n## 📋 执行方派发提示词\n```text\n做\n```\n")
+        rc, out = run(line)
+        check(rc == 0 and "[A005] ⚠️" in out and "T2_方法.md" in out, "card without reviewer prompt must warn A005:\n" + out)
+        write(card, "# T2 方法\n\n## 📋 执行方派发提示词\n```text\n做\n```\n\n## 📋 独立复核方派发提示词\n```text\n核\n```\n")
+        rc, out = run(line)
+        check(rc == 0 and "[A005] ✅" in out, "card with both prompts must pass A005:\n" + out)
+
         write(line / "STATUS.md", "# STATUS\n\n## Handoff（YYYY-MM-DD）\n- 【待填】\n")
         rc, out = run(line)
         check(rc == 1 and "[H005] ❌" in out, "template STATUS must fail:\n" + out)

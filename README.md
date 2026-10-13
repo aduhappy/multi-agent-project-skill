@@ -104,7 +104,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 - 单线项目：`assets/AGENTS.md` → 线目录 `AGENTS.md`
 - 多线项目根：`assets/ROOT_AGENTS.md` → 课题根 `AGENTS.md`
 - 多线项目每条线：`assets/AGENTS.md` → `<线目录>/AGENTS.md`
-- `assets/任务规划_模板.md` → 任务卡（关键卡含执行/复核双提示词）
+- `assets/任务规划_模板.md` → 任务卡（一个任务一张卡，执行与独立复核同卡、各带派发提示词）
 - `assets/来源.txt` → 各数据集目录
 - `assets/check_handoff.py` → 项目 `scripts/check_handoff.py`
 
