@@ -89,6 +89,11 @@ def main() -> int:
         write(card, card.read_text(encoding="utf-8") + extra)
         rc, out = run(line)
         check(rc == 0 and "[A006] ⚠️" in out and "4 段提示词" in out, "card with 4 prompts must warn A006:\n" + out)
+        write(card, "# T2 方法\n\n## 📋 执行方提示词（整段复制）\n```text\n做\n```\n\n## 📋 复核方提示词\n```text\n核\n```\n"
+              "\n## 📋 续跑执行方提示词\n```text\n续\n```\n\n## 📋 签核指令（整段复制）\n```text\n签\n```\n")
+        rc, out = run(line)
+        check("[A005] ✅" in out, "prompt headings without 派发 must still count for A005:\n" + out)
+        check("[A006] ⚠️" in out and "4 段提示词" in out, "📋 heading without 提示词 must count for A006:\n" + out)
         write(line / "文档" / "任务卡_README.md", "# 索引\n" + "| T | 很长的说明 |\n" * 1200)
         rc, out = run(line)
         check(rc == 0 and "[A003] ⚠️" in out and "任务卡_README.md" in out, "oversized card index must warn A003:\n" + out)

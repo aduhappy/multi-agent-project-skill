@@ -19,7 +19,8 @@
   H009 TL;DR 日期与 §3 不矛盾（任一方没日期则跳过）
   A001–A006 只提示不阻断：决策登记表、多脚本常量漂移、入口与任务卡索引体积、
              看板全未勾、任务卡缺执行方或独立复核方派发提示词、任务卡过大
-             （A005、A006 只查 文档/任务卡/ 顶层的卡，只数字节和标题，不解析卡面内容）
+             （A005、A006 只查 文档/任务卡/ 顶层的卡，只数字节和标题，不解析卡面内容；
+              提示词段＝标题带 📋 或“提示词”，两条共用这一个判据）
 
 根索引检查（--scope index）：
   I001 根 AGENTS.md 存在；I002 声明为索引；I003 表里列出的线级 AGENTS.md 都存在
@@ -42,6 +43,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 DATE_RE = re.compile(r"(?<!\d)(20\d{2}-\d{2}-\d{2})(?!\d)")
+PROMPT_HEAD_RE = re.compile(r"(?m)^#{1,6}\s.*(?:📋|提示词).*$")
 PLACEHOLDER_RE = re.compile(r"例：|e\.g\.|\bTODO\b|【待填|YYYY-MM-DD|<fill|\[fill", re.I)
 
 findings: list[tuple[str, str, bool, str, bool]] = []  # code, name, ok, detail, advisory
@@ -195,10 +197,10 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
     cards = sorted(cards_dir.glob("*.md")) if cards_dir.is_dir() else []
     lacking = []
     for fp in cards:
-        heads = re.findall(r"(?m)^#{1,6}\s.*派发提示词.*$", read(fp))
+        heads = PROMPT_HEAD_RE.findall(read(fp))
         if not (any("执行" in h for h in heads) and any("复核" in h for h in heads)):
             lacking.append(fp.name)
-    add("A005", "任务卡同时带执行方和独立复核方派发提示词", not lacking,
+    add("A005", "任务卡同时带执行方和独立复核方提示词", not lacking,
         (f"{len(lacking)} 张缺：" + "、".join(lacking[:5]) + ("…" if len(lacking) > 5 else "")
          + "；一个任务一张卡，复核写在同一张卡里") if lacking else f"{len(cards)} 张卡", True)
 
@@ -206,7 +208,7 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
     for fp in cards:
         text = read(fp)
         size = len(text.encode("utf-8"))
-        prompts = len(re.findall(r"(?m)^#{1,6}\s.*提示词", text))
+        prompts = len(PROMPT_HEAD_RE.findall(text))
         if size > 15_000 or prompts > 3:
             bloated.append(f"{fp.name}（{size // 1000}KB，{prompts} 段提示词）")
     add("A006", "任务卡 ≤15KB、提示词段 ≤3", not bloated,
