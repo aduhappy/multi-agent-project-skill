@@ -91,7 +91,7 @@ from config.参数 import AFF_STUDIES, DROP_STUDIES   # 读，不复述
 
 ## 5. 标准 handoff 摘要 + STATUS.md（增量交接落盘文件）
 
-agent 收工时（除更新 AGENTS.md 外）写/更新 **`STATUS.md`**（放在项目根目录）。这是下个 agent 的第一眼——**读这个就能一秒接上当前工作，不依赖对话历史**（对话可能被压缩/重置，文件不会）。
+agent 收工时（执行方、复核方另回写任务卡“进度回写”，主控另更新 AGENTS.md）写/更新 **`STATUS.md`**（放在项目根目录）。这是下个 agent 的第一眼——**读这个就能一秒接上当前工作，不依赖对话历史**（对话可能被压缩/重置，文件不会）。
 
 **关键：STATUS.md 记增量，AGENTS.md §3 记累计快照，两者不重复。**
 - STATUS.md = "本 agent 这一轮做了什么、动了哪些文件、踩了什么坑"（自上次以来的变化）
@@ -113,7 +113,7 @@ agent 收工时（除更新 AGENTS.md 外）写/更新 **`STATUS.md`**（放在�
 在 AGENTS.md §3 "现在在哪"里放一行指针："`→ 本轮增量 handoff 见 STATUS.md`"，§3 只保留最新 1-2 条累计状态，细节下沉。
 配合记忆层（Cursor memory / Claude memory）用，但 **STATUS.md 是真相源**——删光记忆也能接上。
 
-**收工自检脚本**：`check_handoff.py` 收工自检：线级运行 `python ../scripts/check_handoff.py`（脚本在线目录里就去掉 `../`），查 §3 日期新鲜、TL;DR 已填、STATUS 非模板、STATUS 日期 ≥ §3、§4 看板、薄指针；另有 4 条只提示不阻断的提醒（决策登记表、多脚本常量漂移、文件体积、看板全未勾）。多线课题的根目录用 `--scope index` 查索引。项目里若有不认识 `--scope` 的旧副本，先整体替换成本版。
+**收工自检脚本**：`check_handoff.py` 查什么、怎么跑，见 `SKILL.md` 模式 A 第 8 步（只写在那一处）。
 
 ## 6. 命名约定 + 幂等性
 - 输出文件命名带版本/日期/坐标系：`<output>_v1_20260615.tif`、`Fig_<topic>_<var>.png`，避免多 agent 产出同名覆盖。

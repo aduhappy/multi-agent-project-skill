@@ -12,3 +12,6 @@ Thumbs.db
 *.npz
 *.parquet
 __pycache__/
+
+# 本地开发记录（审查、任务卡、复核报告），不推送
+_开发/

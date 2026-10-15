@@ -17,8 +17,9 @@
   H007 至少一个薄指针指向 AGENTS.md（没有薄指针也算通过）
   H008 §4 看板存在且有任务行
   H009 TL;DR 日期与 §3 不矛盾（任一方没日期则跳过）
-  A001–A005 只提示不阻断：决策登记表、多脚本常量漂移、文件体积、看板全未勾、
-             任务卡缺执行方或独立复核方派发提示词（只查 文档/任务卡/ 顶层的卡）
+  A001–A006 只提示不阻断：决策登记表、多脚本常量漂移、入口与任务卡索引体积、
+             看板全未勾、任务卡缺执行方或独立复核方派发提示词、任务卡过大
+             （A005、A006 只查 文档/任务卡/ 顶层的卡，只数字节和标题，不解析卡面内容）
 
 根索引检查（--scope index）：
   I001 根 AGENTS.md 存在；I002 声明为索引；I003 表里列出的线级 AGENTS.md 都存在
@@ -179,9 +180,11 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
     drift = [f"{name}: {list(v.values())}" for name, v in seen.items() if len(v) > 1]
     add("A002", "多脚本同名常量集合一致", not drift, "; ".join(drift), True)
 
+    index = read(root / "文档" / "任务卡_README.md")
     big = [f"{n} {len(t.encode('utf-8')) // 1000}KB" for n, t, limit in
-           (("AGENTS.md", agents, 25_000), ("STATUS.md", status, 40_000)) if len(t.encode("utf-8")) > limit]
-    add("A003", "AGENTS ≤25KB、STATUS ≤40KB", not big,
+           (("AGENTS.md", agents, 25_000), ("STATUS.md", status, 40_000), ("任务卡_README.md", index, 15_000))
+           if len(t.encode("utf-8")) > limit]
+    add("A003", "AGENTS ≤25KB、STATUS ≤40KB、任务卡索引 ≤15KB", not big,
         ", ".join(big) + ("；旧段原样移到 文档/*_归档_至<日期>.md，入口留一行 > 引用（不要写成带日期的标题）" if big else ""), True)
 
     checked = len(re.findall(r"(?m)^\s*[-*]\s*\[[xX]\]", sec4))
@@ -198,6 +201,17 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
     add("A005", "任务卡同时带执行方和独立复核方派发提示词", not lacking,
         (f"{len(lacking)} 张缺：" + "、".join(lacking[:5]) + ("…" if len(lacking) > 5 else "")
          + "；一个任务一张卡，复核写在同一张卡里") if lacking else f"{len(cards)} 张卡", True)
+
+    bloated = []
+    for fp in cards:
+        text = read(fp)
+        size = len(text.encode("utf-8"))
+        prompts = len(re.findall(r"(?m)^#{1,6}\s.*提示词", text))
+        if size > 15_000 or prompts > 3:
+            bloated.append(f"{fp.name}（{size // 1000}KB，{prompts} 段提示词）")
+    add("A006", "任务卡 ≤15KB、提示词段 ≤3", not bloated,
+        (f"{len(bloated)} 张：" + "、".join(bloated[:5]) + ("…" if len(bloated) > 5 else "")
+         + "；就地改、删用过的提示词，该开新卡的开新卡（见 任务卡_README.md 卡面规矩）") if bloated else "", True)
 
 
 def index_checks(root: Path) -> None:

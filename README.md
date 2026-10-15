@@ -66,7 +66,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 - **数据集 `来源.txt`**——DOI/URL/日期/口径/单位，换人换 agent 都能溯源
 - **自包含任务卡**——冷启动可执行，零上下文 agent 能直接动手（含"交付前必做"收尾清单 + 可选建议模型）
 - **决策记录（ADR）+ 词汇表 + 进度日志**——防下个 agent 重新踩坑、重新质疑已定的事
-- **收工规矩**——每个 agent 退出前更新现状 + 看板，保证接力不断
+- **收工规矩**——执行方、复核方回写任务卡“进度回写”和 STATUS，主控收口时更新现状、看板和索引，保证接力不断
 - **独立复核阀门**——"别信自检"，关键产物必须主控/第三 agent 抽验后才放行下一棒
 - **关键数字与口径参数防漂移**——同一数字只在一处写定；口径/样本集抽进唯一 config，别在多脚本各自硬编码；收工核对一致性
 - **坏产物与被取代脚本退役**——错产物、被决策取代的旧脚本立即标作废，静默复用比没产出更致命
@@ -74,7 +74,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 - **AGENTS.md 顶部 TL;DR 块**——3 行速读（当前阶段/下一步/阻塞），新 agent 不用读全文就知状态
 - **STATUS.md 增量 handoff**——只记"本轮做了什么/动了哪些文件/踩了什么坑"，和 AGENTS.md §3 累计快照不重叠
 - **check_handoff.py 收工自检**——脚本验证 §3 日期新鲜/TL;DR 已填/STATUS 非模板/薄指针存在，全过才算交接合格
-- **任务卡目录索引**——依赖链 + 当前状态表，新 agent 知道先做哪张卡
+- **任务卡目录索引**——依赖链 + 当前状态表 + 卡面规矩（谁改哪里、何时开新卡、体积线），卡不会越写越大
 - **双提示词与身份留痕**——关键卡同时带执行方和复核方提示词，写明谁（工具/模型/家族）做的；未知写 `UNKNOWN`，不算通过
 - **根/线 scope**——多线根只做索引，线级入口自包含；`check_handoff.py --scope index|line` 分开检查
 ## 何时触发
@@ -104,14 +104,15 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 - 单线项目：`assets/AGENTS.md` → 线目录 `AGENTS.md`
 - 多线项目根：`assets/ROOT_AGENTS.md` → 课题根 `AGENTS.md`
 - 多线项目每条线：`assets/AGENTS.md` → `<线目录>/AGENTS.md`
-- `assets/任务规划_模板.md` → 任务卡（一个任务一张卡，执行与独立复核同卡、各带派发提示词）
+- `assets/任务规划_模板.md` → 任务卡（一个任务一张卡，执行与独立复核同卡、各带派发提示词；卡头“进度回写”由执行方、复核方填）
+- `assets/任务卡_README.md` → `文档/任务卡_README.md`（任务卡索引与卡面规矩）
 - `assets/来源.txt` → 各数据集目录
 - `assets/check_handoff.py` → 项目 `scripts/check_handoff.py`
 
 > ⚠️ 中文文件名注意：如果你的 toolchain 对中文路径挑剔，在**你自己的项目里**改用 ASCII 文件名并更新线级入口指针；不要改变本 skill 的安装目录 `multi-agent-project`。
 
 
-`check_handoff.py` 收工自检：线级运行 `python ../scripts/check_handoff.py`（脚本在线目录里就去掉 `../`），查 §3 日期新鲜、TL;DR 已填、STATUS 非模板、STATUS 日期 ≥ §3、§4 看板、薄指针；另有 4 条只提示不阻断的提醒（决策登记表、多脚本常量漂移、文件体积、看板全未勾）。多线课题的根目录用 `--scope index` 查索引。项目里若有不认识 `--scope` 的旧副本，先整体替换成本版。技能仓库自身运行 `python tests/test_skill.py`。
+`check_handoff.py` 收工自检：线级运行 `python ../scripts/check_handoff.py`（脚本在线目录里就去掉 `../`），查 §3 日期新鲜、TL;DR 已填、STATUS 非模板、STATUS 日期 ≥ §3、§4 看板、薄指针；另有 6 条只提示不阻断的提醒（决策登记表、多脚本常量漂移、入口与索引体积、看板全未勾、任务卡缺派发提示词、任务卡过大）。多线课题的根目录用 `--scope index` 查索引。项目里若有不认识 `--scope` 的旧副本，先整体替换成本版。技能仓库自身运行 `python tests/test_skill.py`。
 
 ## 生成的文件骨架
 
@@ -157,7 +158,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 1. **纯 Markdown + 相对路径 + 标准文件名**——别用某软件专属语法
 2. **数据带 `来源.txt`**（DOI/URL/日期/口径/单位）——换人换 agent 都能溯源
-3. **收工规矩写进铁律**——每个 agent 退出前更新 §现在在哪 + §任务看板 + 写/更新 `STATUS.md`（handoff 落盘文件，下个 agent 读这个就能接上，不依赖对话历史）
+3. **收工规矩写进铁律**——执行方、复核方退出前回写任务卡“进度回写”并写 `STATUS.md`（handoff 落盘文件，下个 agent 读这个就能接上，不依赖对话历史）；主控收口时更新 §现在在哪 + §任务看板
 4. **路径纪律**——"大文件进工作盘、小产物回仓库""复制不剪切"
 5. **新 agent（含子 agent）进门第一件事**——读完 AGENTS.md（含 STATUS.md）再动手；具约束力的决策上浮到**有界必读层**（§3 / 决策登记表），别埋在 STATUS 长叙事里
 6. **关键数字与口径参数单一来源**——数字只在一处写定；**口径/样本集/排除清单抽进唯一 config，所有脚本读它、别在多脚本各自硬编码**；收工核对文档与脚本一致性
