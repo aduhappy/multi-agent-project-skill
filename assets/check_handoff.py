@@ -17,10 +17,11 @@
   H007 至少一个薄指针指向 AGENTS.md（没有薄指针也算通过）
   H008 §4 看板存在且有任务行
   H009 TL;DR 日期与 §3 不矛盾（任一方没日期则跳过）
-  A001–A006 只提示不阻断：决策登记表、多脚本常量漂移、入口与任务卡索引体积、
-             看板全未勾、任务卡缺执行方或独立复核方派发提示词、任务卡过大
-             （A005、A006 只查 文档/任务卡/ 顶层的卡，只数字节和标题，不解析卡面内容；
-              提示词段＝标题带 📋 或“提示词”，两条共用这一个判据）
+  A001–A008 只提示不阻断：决策登记表、多脚本常量漂移、入口与任务卡索引体积、
+             看板全未勾、任务卡缺执行方或独立复核方派发提示词、任务卡过大、
+             卡面状态与 §4 看板／任务卡索引对不上、§3 超 5 条或挂着已收口卡的“待审查”
+             （A005—A008 只查 文档/任务卡/ 顶层的卡；提示词段＝标题带 📋 或“提示词”；
+              A007、A008 只读“进度回写”节的“状态：”行，只比收口（✅/🗄️）与否）
 
 根索引检查（--scope index）：
   I001 根 AGENTS.md 存在；I002 声明为索引；I003 表里列出的线级 AGENTS.md 都存在
@@ -44,6 +45,8 @@ for _stream in (sys.stdout, sys.stderr):
 
 DATE_RE = re.compile(r"(?<!\d)(20\d{2}-\d{2}-\d{2})(?!\d)")
 PROMPT_HEAD_RE = re.compile(r"(?m)^#{1,6}\s.*(?:📋|提示词).*$")
+STATE_RE = re.compile(r"🟠|⬜|⏳|🟡|🔵|✅|⛔|🗄")
+CLOSED = ("✅", "🗄")
 PLACEHOLDER_RE = re.compile(r"例：|e\.g\.|\bTODO\b|【待填|YYYY-MM-DD|<fill|\[fill", re.I)
 
 findings: list[tuple[str, str, bool, str, bool]] = []  # code, name, ok, detail, advisory
@@ -214,6 +217,57 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
     add("A006", "任务卡 ≤15KB、提示词段 ≤3", not bloated,
         (f"{len(bloated)} 张：" + "、".join(bloated[:5]) + ("…" if len(bloated) > 5 else "")
          + "；就地改、删用过的提示词，该开新卡的开新卡（见 任务卡_README.md 卡面规矩）") if bloated else "", True)
+
+    states = card_states(cards)
+    sec3 = section(agents, "3", {"现在在哪", "Where We Are Now"})
+    drift = []
+    for row in (ln for ln in index.splitlines() if ln.lstrip().startswith("|")):
+        cells = [c.strip(" *`") for c in row.strip().strip("|").split("|")]
+        for cid, (state, name) in states.items():
+            mark = STATE_RE.search("|".join(cells[1:]))
+            if (cells[0] == cid or name in row) and mark and (mark.group(0) in CLOSED) != (state in CLOSED):
+                drift.append(f"{cid} 卡面 {state}／索引 {mark.group(0)}")
+    for item in re.finditer(r"(?m)^\s*[-*]\s*\[([ xX]?)\](.*)$", sec4):
+        cid = subject_card(item.group(2), states)
+        done = item.group(1) in ("x", "X")
+        if cid and done != (states[cid][0] in CLOSED):
+            drift.append(f"{cid} 卡面 {states[cid][0]}／§4 {'已勾' if done else '未勾'}")
+    add("A007", "卡面状态与 §4 看板、任务卡索引一致（只比收口与否）", not drift,
+        ("；".join(drift[:6]) + ("…" if len(drift) > 6 else "") + "；对不上以卡面为准，主控收口时同步 §4 与索引")
+        if drift else f"{len(states)} 张卡有“进度回写”", True)
+
+    items = [ln for ln in sec3.splitlines() if re.match(r"^[-*]\s+(?!`?→)", ln)]
+    stale = sorted({cid for ln in sec3.splitlines() if re.search(r"待审查|待复核|待收口|已交回|🟡|🔵", ln)
+                    for cid in [subject_card(ln, states)] if cid and states[cid][0] in CLOSED})
+    add("A008", "§3 ≤5 条、不挂已收口卡的“待审查”", len(items) <= 5 and not stale,
+        f"§3 {len(items)} 条" + (f"；卡面已收口仍挂待审查：{'、'.join(stale)}" if stale else "")
+        + ("；§3 只留 1–5 条累计快照，旧条移到归档" if len(items) > 5 or stale else ""), True)
+
+
+def card_re(cid: str) -> re.Pattern[str]:
+    return re.compile(rf"(?<![A-Za-z0-9-]){re.escape(cid)}(?![A-Za-z0-9-])")
+
+
+def subject_card(line: str, states: dict[str, tuple[str, str]]) -> Optional[str]:
+    """这一条说的是哪张卡：第一段加粗里最先出现的卡号；没有加粗就看整行。"""
+    bold = re.search(r"\*\*(.+?)\*\*", line)
+    text = bold.group(1) if bold else line
+    hits = [(m.start(), cid) for cid in states for m in [card_re(cid).search(text)] if m]
+    return min(hits)[1] if hits else None
+
+
+def card_states(cards: list[Path]) -> dict[str, tuple[str, str]]:
+    """卡号（文件名第一个 _ 之前）→（“进度回写”节里“状态：”行的第一个状态符号, 文件名）。"""
+    states = {}
+    for fp in cards:
+        text = read(fp)
+        head = re.search(r"(?m)^##\s*进度回写.*$", text)
+        body = text[head.end():].split("\n## ", 1)[0] if head else ""
+        line = re.search(r"(?m)^\s*[-*]\s*\**状态\**[:：](.*)$", body)
+        mark = STATE_RE.search(line.group(1)) if line else None
+        if mark:
+            states[fp.stem.split("_")[0]] = (mark.group(0), fp.name)
+    return states
 
 
 def index_checks(root: Path) -> None:

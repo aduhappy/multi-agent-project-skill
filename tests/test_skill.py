@@ -94,6 +94,22 @@ def main() -> int:
         rc, out = run(line)
         check("[A005] ✅" in out, "prompt headings without 派发 must still count for A005:\n" + out)
         check("[A006] ⚠️" in out and "4 段提示词" in out, "📋 heading without 提示词 must count for A006:\n" + out)
+
+        agents = (line / "AGENTS.md").read_text(encoding="utf-8")
+        write(card, "# T2 方法\n\n## 进度回写（执行方、复核方只改这一节）\n\n- 状态：✅已收口（D-02）\n- 执行方：略\n\n"
+              "## 📋 执行方提示词\n```text\n做\n```\n\n## 📋 复核方提示词\n```text\n核\n```\n")
+        write(line / "文档" / "任务卡_README.md", "| 卡 | 做什么 | 状态 | 文件 |\n|---|---|---|---|\n"
+              "| T2 | 方法 | ✅已收口（D-02） | `任务卡/T2_方法.md` |\n")
+        write(line / "AGENTS.md", agents.replace("- [ ] T2 方法", "- [x] **T2 方法** —— 已收口（D-02）"))
+        rc, out = run(line)
+        check(rc == 0 and "[A007] ✅" in out and "[A008] ✅" in out, "closed card synced everywhere must pass A007/A008:\n" + out)
+        write(line / "AGENTS.md", agents.replace("- [ ] T2 方法", "- [ ] 🟡 **T2 方法** —— 已交回").replace(
+            "- 2026-09-15：初稿完成\n", "- 2026-09-15：初稿完成\n- 🟡 **T2 已交回待审查**（2026-09-14）\n"
+            + "".join(f"- 2026-09-1{i}：第 {i} 条\n" for i in range(5))))
+        rc, out = run(line)
+        check(rc == 0 and "[A007] ⚠️" in out and "T2 卡面 ✅／§4 未勾" in out, "closed card unticked on §4 must warn A007:\n" + out)
+        check("[A008] ⚠️" in out and "§3 7 条" in out and "待审查：T2" in out, "long §3 with stale 待审查 must warn A008:\n" + out)
+        write(line / "AGENTS.md", agents)
         write(line / "文档" / "任务卡_README.md", "# 索引\n" + "| T | 很长的说明 |\n" * 1200)
         rc, out = run(line)
         check(rc == 0 and "[A003] ⚠️" in out and "任务卡_README.md" in out, "oversized card index must warn A003:\n" + out)
