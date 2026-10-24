@@ -109,6 +109,24 @@ def main() -> int:
         rc, out = run(line)
         check(rc == 0 and "[A007] ⚠️" in out and "T2 卡面 ✅／§4 未勾" in out, "closed card unticked on §4 must warn A007:\n" + out)
         check("[A008] ⚠️" in out and "§3 7 条" in out and "待审查：T2" in out, "long §3 with stale 待审查 must warn A008:\n" + out)
+        synced = agents.replace("- [ ] T2 方法", "- [x] **T2 方法** —— 已收口（D-02）")
+        write(line / "AGENTS.md", synced)
+        write(line / "文档" / "任务卡_README.md", "| 卡 | 做什么 | 状态 | 文件 |\n|---|---|---|---|\n"
+              "| T2 | 方法 | ⬜可派（D-02） | `任务卡/T2_方法.md` |\n")
+        rc, out = run(line)
+        check(rc == 0 and "[A007] ⚠️" in out and "索引" in out and "[A008] ✅" in out, "index-only drift must warn A007 only:\n" + out)
+        write(line / "文档" / "任务卡_README.md", "| 卡 | 做什么 | 状态 | 文件 |\n|---|---|---|---|\n"
+              "| T2 | 方法 | ✅已收口（D-02） | `任务卡/T2_方法.md` |\n")
+        write(line / "AGENTS.md", synced.replace("- 2026-09-15：初稿完成\n", "- 2026-09-15：初稿完成\n"
+              + "".join(f"- 2026-09-1{i}：第 {i} 条\n" for i in range(5))))
+        rc, out = run(line)
+        check(rc == 0 and "[A008] ⚠️" in out and "§3 6 条" in out and "待审查：" not in out and "[A007] ✅" in out,
+              "long §3 alone must warn A008 only:\n" + out)
+        for stale_line in ("- 🟡 **T2 已交回待审查**（2026-09-14）\n", "- 2026-10-24：T2 已交回待审查\n"):
+            write(line / "AGENTS.md", synced.replace("- 2026-09-15：初稿完成\n", "- 2026-09-15：初稿完成\n" + stale_line))
+            rc, out = run(line)
+            check(rc == 0 and "[A008] ⚠️" in out and "§3 2 条" in out and "待审查：T2" in out and "[A007] ✅" in out,
+                  "stale 待审查 alone must warn A008 only:\n" + out)
         write(line / "AGENTS.md", agents)
         write(line / "文档" / "任务卡_README.md", "# 索引\n" + "| T | 很长的说明 |\n" * 1200)
         rc, out = run(line)

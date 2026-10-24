@@ -223,6 +223,7 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
     drift = []
     for row in (ln for ln in index.splitlines() if ln.lstrip().startswith("|")):
         cells = [c.strip(" *`") for c in row.strip().strip("|").split("|")]
+        # 卡号通常在第一列；第一列是序号等时退回“卡文件名出现在这一行”
         for cid, (state, name) in states.items():
             mark = STATE_RE.search("|".join(cells[1:]))
             if (cells[0] == cid or name in row) and mark and (mark.group(0) in CLOSED) != (state in CLOSED):
@@ -249,7 +250,8 @@ def card_re(cid: str) -> re.Pattern[str]:
 
 
 def subject_card(line: str, states: dict[str, tuple[str, str]]) -> Optional[str]:
-    """这一条说的是哪张卡：第一段加粗里最先出现的卡号；没有加粗就看整行。"""
+    """这一条说的是哪张卡：第一段加粗里最先出现的卡号；没有加粗才看整行。
+    约定：§3、§4 条目若有加粗，卡号写进第一段加粗；不回退到整行，免得把顺带提到的卡当成主题。"""
     bold = re.search(r"\*\*(.+?)\*\*", line)
     text = bold.group(1) if bold else line
     hits = [(m.start(), cid) for cid in states for m in [card_re(cid).search(text)] if m]

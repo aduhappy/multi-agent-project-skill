@@ -47,7 +47,7 @@
 - UAV 建模用 Metashape env（`D:\software\conda\envs\metashape\python.exe`），水文分析用 `hydrology` env。**两套环境不可混用**（GIS 相关 DLL 冲突）。
 - 中文图内 μ、±、² 等字符用 mathtext 渲染，SimHei 缺这些字形会显方框。
 - **代码归位**：Python 脚本放 `scripts/`，每加一个同步更新 `scripts/README.md`。R 脚本放 `scripts/r/`。
-- **收工规矩**：执行方、复核方改任务卡“进度回写”并在 `STATUS.md` 追加增量；主控收口时更新 §3/§3.5/§4 和任务卡索引；收工都跑 `python scripts/check_handoff.py` 自检，全过才算交接合格。
+- **收工规矩**：谁改哪里见 `文档/任务卡_README.md`“卡面规矩”；收工都跑 `python scripts/check_handoff.py` 自检，全过才算交接合格。
 
 ## 5.5 路径约定（重要：避免 OneDrive 同步爆炸）
 项目根 `F:\research\bridge_scour` 在 OneDrive 里同步。大文件不进根目录：
