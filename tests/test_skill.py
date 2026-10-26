@@ -130,11 +130,11 @@ def main() -> int:
                   "stale 待审查 alone must warn A008 only:\n" + out)
         card_base = card.read_text(encoding="utf-8")
         row = "- 执行方："
-        for size, expect in ((300, "✅"), (301, "⚠️")):
+        for size, expect in ((400, "✅"), (401, "⚠️")):
             write(card, card_base.replace("- 执行方：略", row + "字" * (size - len(row))))
             rc, out = run(line)
-            check(rc == 0 and f"[A009] {expect}" in out and ("T2_方法.md「执行方」行 301 字" in out) == (size == 301),
-                  f"进度回写 row of {size} chars must give A009 {expect} only above 300:\n" + out)
+            check(rc == 0 and f"[A009] {expect}" in out and ("T2_方法.md「执行方」行 401 字" in out) == (size == 401),
+                  f"进度回写 row of {size} chars must give A009 {expect} only above 400:\n" + out)
         write(card, card_base)
 
         base = "- 2026-09-15：初稿完成"

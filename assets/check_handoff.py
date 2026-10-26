@@ -20,7 +20,7 @@
   A001–A010 只提示不阻断：决策登记表、多脚本常量漂移、入口与任务卡索引体积、
              看板全未勾、任务卡缺执行方或独立复核方派发提示词、任务卡过大、
              卡面状态与 §4 看板／任务卡索引对不上、§3 超 5 条或挂着已收口卡的“待审查”、
-             “进度回写”单行超 300 字、§3 单条超 600 字
+             “进度回写”单行超 400 字、§3 单条超 600 字
              （A005—A009 只查 文档/任务卡/ 顶层的卡；提示词段＝标题带 📋 或“提示词”；
               A007、A008 只读“进度回写”节的“状态：”行，只比收口（✅/🗄️）与否；
               A009 只数“进度回写”节里以 - 或 * 开头的行；A010 的一条＝§3 顶层列表项连同缩进的续行）
@@ -252,8 +252,8 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
         head = re.search(r"(?m)^##\s*进度回写.*$", text)
         body = text[head.end():].split("\n## ", 1)[0] if head else ""
         long_rows += [f"{fp.name}「{re.split('[:：]', ln.strip().lstrip('-* '))[0][:12]}」行 {len(ln.strip())} 字"
-                      for ln in body.splitlines() if re.match(r"^\s*[-*]\s", ln) and len(ln.strip()) > 300]
-    add("A009", "“进度回写”每行 ≤300 字", not long_rows,
+                      for ln in body.splitlines() if re.match(r"^\s*[-*]\s", ln) and len(ln.strip()) > 400]
+    add("A009", "“进度回写”每行 ≤400 字", not long_rows,
         ("；".join(long_rows[:4]) + ("…" if len(long_rows) > 4 else "")
          + "；一句话结果之外的细节写进 STATUS 或结果说明") if long_rows else "", True)
 
