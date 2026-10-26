@@ -17,11 +17,13 @@
   H007 至少一个薄指针指向 AGENTS.md（没有薄指针也算通过）
   H008 §4 看板存在且有任务行
   H009 TL;DR 日期与 §3 不矛盾（任一方没日期则跳过）
-  A001–A008 只提示不阻断：决策登记表、多脚本常量漂移、入口与任务卡索引体积、
+  A001–A010 只提示不阻断：决策登记表、多脚本常量漂移、入口与任务卡索引体积、
              看板全未勾、任务卡缺执行方或独立复核方派发提示词、任务卡过大、
-             卡面状态与 §4 看板／任务卡索引对不上、§3 超 5 条或挂着已收口卡的“待审查”
-             （A005—A008 只查 文档/任务卡/ 顶层的卡；提示词段＝标题带 📋 或“提示词”；
-              A007、A008 只读“进度回写”节的“状态：”行，只比收口（✅/🗄️）与否）
+             卡面状态与 §4 看板／任务卡索引对不上、§3 超 5 条或挂着已收口卡的“待审查”、
+             “进度回写”单行超 300 字、§3 单条超 600 字
+             （A005—A009 只查 文档/任务卡/ 顶层的卡；提示词段＝标题带 📋 或“提示词”；
+              A007、A008 只读“进度回写”节的“状态：”行，只比收口（✅/🗄️）与否；
+              A009 只数“进度回写”节里以 - 或 * 开头的行；A010 的一条＝§3 顶层列表项连同缩进的续行）
 
 根索引检查（--scope index）：
   I001 根 AGENTS.md 存在；I002 声明为索引；I003 表里列出的线级 AGENTS.md 都存在
@@ -243,6 +245,33 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
     add("A008", "§3 ≤5 条、不挂已收口卡的“待审查”", len(items) <= 5 and not stale,
         f"§3 {len(items)} 条" + (f"；卡面已收口仍挂待审查：{'、'.join(stale)}" if stale else "")
         + ("；§3 只留 1–5 条累计快照，旧条移到归档" if len(items) > 5 or stale else ""), True)
+
+    long_rows = []
+    for fp in cards:
+        text = read(fp)
+        head = re.search(r"(?m)^##\s*进度回写.*$", text)
+        body = text[head.end():].split("\n## ", 1)[0] if head else ""
+        long_rows += [f"{fp.name}「{re.split('[:：]', ln.strip().lstrip('-* '))[0][:12]}」行 {len(ln.strip())} 字"
+                      for ln in body.splitlines() if re.match(r"^\s*[-*]\s", ln) and len(ln.strip()) > 300]
+    add("A009", "“进度回写”每行 ≤300 字", not long_rows,
+        ("；".join(long_rows[:4]) + ("…" if len(long_rows) > 4 else "")
+         + "；一句话结果之外的细节写进 STATUS 或结果说明") if long_rows else "", True)
+
+    entries, cur = [], None
+    for ln in sec3.splitlines()[1:]:
+        if re.match(r"^[-*]\s+(?!`?→)", ln):
+            cur = [ln]
+            entries.append(cur)
+        elif re.match(r"^\S", ln):
+            cur = None
+        elif cur is not None:
+            cur.append(ln)
+    sizes = [len("\n".join(e).strip()) for e in entries]
+    wordy = [f"第 {i} 条（{e[0].lstrip('-* ')[:14]}…）{n} 字"
+             for i, (e, n) in enumerate(zip(entries, sizes), 1) if n > 600]
+    add("A010", "§3 每条 ≤600 字", not wordy,
+        ("；".join(wordy[:4]) + ("…" if len(wordy) > 4 else "")
+         + "；细节写进 STATUS，§3 只留累计快照；不要往 §3 追加执行方交回长段") if wordy else "", True)
 
 
 def card_re(cid: str) -> re.Pattern[str]:

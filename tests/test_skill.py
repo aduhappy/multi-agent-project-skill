@@ -103,6 +103,7 @@ def main() -> int:
         write(line / "AGENTS.md", agents.replace("- [ ] T2 方法", "- [x] **T2 方法** —— 已收口（D-02）"))
         rc, out = run(line)
         check(rc == 0 and "[A007] ✅" in out and "[A008] ✅" in out, "closed card synced everywhere must pass A007/A008:\n" + out)
+        check("[A009] ✅" in out and "[A010] ✅" in out, "short 进度回写 rows and short §3 must pass A009/A010:\n" + out)
         write(line / "AGENTS.md", agents.replace("- [ ] T2 方法", "- [ ] 🟡 **T2 方法** —— 已交回").replace(
             "- 2026-09-15：初稿完成\n", "- 2026-09-15：初稿完成\n- 🟡 **T2 已交回待审查**（2026-09-14）\n"
             + "".join(f"- 2026-09-1{i}：第 {i} 条\n" for i in range(5))))
@@ -127,6 +128,25 @@ def main() -> int:
             rc, out = run(line)
             check(rc == 0 and "[A008] ⚠️" in out and "§3 2 条" in out and "待审查：T2" in out and "[A007] ✅" in out,
                   "stale 待审查 alone must warn A008 only:\n" + out)
+        card_base = card.read_text(encoding="utf-8")
+        row = "- 执行方："
+        for size, expect in ((300, "✅"), (301, "⚠️")):
+            write(card, card_base.replace("- 执行方：略", row + "字" * (size - len(row))))
+            rc, out = run(line)
+            check(rc == 0 and f"[A009] {expect}" in out and ("T2_方法.md「执行方」行 301 字" in out) == (size == 301),
+                  f"进度回写 row of {size} chars must give A009 {expect} only above 300:\n" + out)
+        write(card, card_base)
+
+        base = "- 2026-09-15：初稿完成"
+        for size, expect in ((600, "✅"), (601, "⚠️")):
+            write(line / "AGENTS.md", agents.replace(base, base + "字" * (size - len(base))))
+            rc, out = run(line)
+            check(rc == 0 and f"[A010] {expect}" in out and ("第 1 条" in out) == (size == 601),
+                  f"§3 item of {size} chars must give A010 {expect} only above 600:\n" + out)
+        write(line / "AGENTS.md", agents.replace(base, base + "\n  - 缩进续行" + "字" * 590))
+        rc, out = run(line)
+        check(rc == 0 and "[A010] ⚠️" in out, "indented continuation lines must count toward the §3 item:\n" + out)
+
         write(line / "AGENTS.md", agents)
         write(line / "文档" / "任务卡_README.md", "# 索引\n" + "| T | 很长的说明 |\n" * 1200)
         rc, out = run(line)

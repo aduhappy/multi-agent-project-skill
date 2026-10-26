@@ -73,7 +73,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 - **AGENTS.md 顶部 TL;DR 块**——3 行速读（当前阶段/下一步/阻塞），新 agent 不用读全文就知状态
 - **STATUS.md 增量 handoff**——只记"本轮做了什么/动了哪些文件/踩了什么坑"，和 AGENTS.md §3 累计快照不重叠
 - **check_handoff.py 收工自检**——脚本验证 §3 日期新鲜/TL;DR 已填/STATUS 非模板/薄指针存在，全过才算交接合格
-- **任务卡目录索引**——依赖链 + 当前状态表 + 卡面规矩（谁改哪里、何时开新卡、体积线），卡不会越写越大
+- **任务卡目录索引**——依赖链 + 当前状态表 + 卡面规矩（谁改哪里、何时开新卡、体积线、写作类“目标＋底线”自由度、冷读复核、可选的阶段通读），卡不会越写越大
 - **双提示词与身份留痕**——关键卡同时带执行方和复核方提示词，写明谁（工具/模型/家族）做的；未知写 `UNKNOWN`，不算通过
 - **根/线 scope**——多线根只做索引，线级入口自包含；`check_handoff.py --scope index|line` 分开检查
 ## 何时触发
@@ -111,7 +111,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 > ⚠️ 中文文件名注意：如果你的 toolchain 对中文路径挑剔，在**你自己的项目里**改用 ASCII 文件名并更新线级入口指针；不要改变本 skill 的安装目录 `multi-agent-project`。
 
 
-`check_handoff.py` 收工自检：线级运行 `python ../scripts/check_handoff.py`（脚本在线目录里就去掉 `../`），查 §3 日期新鲜、TL;DR 已填、STATUS 非模板、STATUS 日期 ≥ §3、§4 看板、薄指针；另有 8 条只提示不阻断的提醒（决策登记表、多脚本常量漂移、入口与索引体积、看板全未勾、任务卡缺派发提示词、任务卡过大、卡面状态与看板／索引对不上、§3 超 5 条或挂着已收口卡）。多线课题的根目录用 `--scope index` 查索引。项目里若有不认识 `--scope` 的旧副本，先整体替换成本版。技能仓库自身运行 `python tests/test_skill.py`。
+`check_handoff.py` 收工自检：线级运行 `python ../scripts/check_handoff.py`（脚本在线目录里就去掉 `../`），查 §3 日期新鲜、TL;DR 已填、STATUS 非模板、STATUS 日期 ≥ §3、§4 看板、薄指针；另有 10 条只提示不阻断的提醒（决策登记表、多脚本常量漂移、入口与索引体积、看板全未勾、任务卡缺派发提示词、任务卡过大、卡面状态与看板／索引对不上、§3 超 5 条或挂着已收口卡、“进度回写”单行或 §3 单条过长）。多线课题的根目录用 `--scope index` 查索引。项目里若有不认识 `--scope` 的旧副本，先整体替换成本版。技能仓库自身运行 `python tests/test_skill.py`。
 
 ## 生成的文件骨架
 
