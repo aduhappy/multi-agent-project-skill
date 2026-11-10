@@ -5,8 +5,9 @@
 
 | 脚本 | 干什么 | 输入 | 输出 | 作者 |
 |---|---|---|---|---|
+| `check_handoff.py` | 收工交接自检（H001–H009 阻断项 + A001–A012 提醒项） | 项目根或线目录 | 终端检查报告与退出码 | multi-agent-project |
+| `archive_status.py` | 一键归档 `STATUS.md` 旧交接段与 `AGENTS.md` §3 旧快照 | `STATUS.md`、`AGENTS.md` | `文档/*_归档_至<日期>.md` 与瘦身后入口 | multi-agent-project |
 | `run_main.py` | 【待填】 | 【待填】 | 【待填】 | 【待填】 |
-| `check_quality.py` | 【待填】 | 【待填】 | 【待填】 | 【待填】 |
 
 ## 已废弃 / 中间版
 

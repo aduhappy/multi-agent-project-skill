@@ -17,13 +17,16 @@
   H007 至少一个薄指针指向 AGENTS.md（没有薄指针也算通过）
   H008 §4 看板存在且有任务行
   H009 TL;DR 日期与 §3 不矛盾（任一方没日期则跳过）
-  A001–A010 只提示不阻断：决策登记表、多脚本常量漂移、入口与任务卡索引体积、
-             看板全未勾、任务卡缺执行方或独立复核方派发提示词、任务卡过大、
+  A001–A012 只提示不阻断：决策登记表、多脚本常量漂移、入口与任务卡索引体积、
+             看板全未勾、任务卡缺执行方或独立复核方派发提示词、任务卡过大（列最大三节）、
              卡面状态与 §4 看板／任务卡索引对不上、§3 超 5 条或挂着已收口卡的“待审查”、
-             “进度回写”单行超 400 字、§3 单条超 600 字
+             “进度回写”单行超 400 字、§3 单条超 600 字、
+             STATUS 最新交接段 ≤800 字且四节齐、复核报告末尾单独一行 PASS 或 NEEDS_FIX
              （A005—A009 只查 文档/任务卡/ 顶层的卡；提示词段＝标题带 📋 或“提示词”；
               A007、A008 只读“进度回写”节的“状态：”行，只比收口（✅/🗄️）与否；
-              A009 只数“进度回写”节里以 - 或 * 开头的行；A010 的一条＝§3 顶层列表项连同缩进的续行）
+              A009 只数“进度回写”节里以 - 或 * 开头的行；A010 的一条＝§3 顶层列表项连同缩进的续行；
+              A011 查 STATUS 最新交接段的字数与四节：改了什么 / 怎么验证的 / 没做什么 / 不确定处；
+              A012 查 文档/ 与 reports/ 下文件名含“复核”的 .md，排除任务卡与作废目录）
 
 根索引检查（--scope index）：
   I001 根 AGENTS.md 存在；I002 声明为索引；I003 表里列出的线级 AGENTS.md 都存在
@@ -46,10 +49,18 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 DATE_RE = re.compile(r"(?<!\d)(20\d{2}-\d{2}-\d{2})(?!\d)")
+FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 PROMPT_HEAD_RE = re.compile(r"(?m)^#{1,6}\s.*(?:📋|提示词).*$")
 STATE_RE = re.compile(r"🟠|⬜|⏳|🟡|🔵|✅|⛔|🗄")
 CLOSED = ("✅", "🗄")
 PLACEHOLDER_RE = re.compile(r"例：|e\.g\.|\bTODO\b|【待填|YYYY-MM-DD|<fill|\[fill", re.I)
+HANDOFF_SECTIONS = (
+    ("改了什么", re.compile(r"(?m)^\s*(?:[-*+]|\d+[.)]|#{2,6})?\s*\**改了什么")),
+    ("怎么验证的", re.compile(r"(?m)^\s*(?:[-*+]|\d+[.)]|#{2,6})?\s*\**怎么验证")),
+    ("没做什么", re.compile(r"(?m)^\s*(?:[-*+]|\d+[.)]|#{2,6})?\s*\**没做什么")),
+    ("不确定处", re.compile(r"(?m)^\s*(?:[-*+]|\d+[.)]|#{2,6})?\s*\**不确定处")),
+)
+SKIP_REVIEW_DIRS = {"任务卡", "决策记录", "原始资料", "_作废", "归档"}
 
 findings: list[tuple[str, str, bool, str, bool]] = []  # code, name, ok, detail, advisory
 
@@ -65,6 +76,21 @@ def read(path: Path) -> str:
         return ""
 
 
+def unfenced_indices(lines: list[str]) -> set[int]:
+    out: set[int] = set()
+    fence_char, fence_len = "", 0
+    for i, ln in enumerate(lines):
+        m = FENCE_RE.match(ln)
+        if not fence_char:
+            if m and (m.group(1)[0] == "~" or "`" not in m.group(2)):
+                fence_char, fence_len = m.group(1)[0], len(m.group(1))
+                continue
+            out.add(i)
+        elif m and m.group(1)[0] == fence_char and len(m.group(1)) >= fence_len and not m.group(2).strip():
+            fence_char, fence_len = "", 0
+    return out
+
+
 def section(text: str, number: str, titles: set[str]) -> str:
     """Level-2 section ``## 3`` / ``## 3.`` / exact title, up to the next ``## ``."""
     lines = text.splitlines()
@@ -78,13 +104,9 @@ def section(text: str, number: str, titles: set[str]) -> str:
 
 
 def strip_fenced(text: str) -> str:
-    out, fenced = [], False
-    for line in text.splitlines():
-        if line.strip().startswith(("```", "~~~")):
-            fenced = not fenced
-        elif not fenced:
-            out.append(line)
-    return "\n".join(out)
+    lines = text.splitlines()
+    keep = unfenced_indices(lines)
+    return "\n".join(ln for i, ln in enumerate(lines) if i in keep)
 
 
 def dates(text: str, today: date) -> list[date]:
@@ -118,6 +140,82 @@ def pointer_ok(text: str) -> bool:
         text,
     )
     return bool(positive and not negative)
+
+
+def handoff_blocks(status: str) -> list[str]:
+    lines = status.splitlines()
+    unfenced = unfenced_indices(lines)
+    headings: list[tuple[int, int, str]] = []
+    for i in sorted(unfenced):
+        m = re.match(r"^\s*(#{1,6})\s+(.*)$", lines[i])
+        if m:
+            headings.append((i, len(m.group(1)), m.group(2).strip()))
+
+    handoffs = [
+        (i, lvl, t) for i, lvl, t in headings
+        if lvl >= 2 and (re.search(r"(?i)handoff", t) or re.match(r"^\d{4}-\d{2}-\d{2}", t))
+    ]
+    if not handoffs:
+        return []
+
+    top_lvl = min(lvl for _, lvl, _ in handoffs)
+    starts = [i for i, lvl, _ in handoffs if lvl == top_lvl]
+    blocks: list[str] = []
+    for idx, start in enumerate(starts):
+        end = next((i for i, lvl, _ in headings if i > start and lvl <= top_lvl), len(lines))
+        seg = lines[start:end]
+        if idx == len(starts) - 1:
+            while seg and not seg[-1].strip():
+                seg.pop()
+            while seg and re.match(r"^>\s*⚠️", seg[-1].strip()):
+                seg.pop()
+                while seg and not seg[-1].strip():
+                    seg.pop()
+        blocks.append("\n".join(seg).strip())
+    return blocks
+
+
+def top_card_sections(text: str, k: int = 3) -> str:
+    lines = text.splitlines()
+    unfenced = unfenced_indices(lines)
+    secs: list[tuple[str, list[str]]] = []
+    cur_title, cur_lines = "(卡头)", []
+    for i, ln in enumerate(lines):
+        if i in unfenced and ln.startswith("## "):
+            secs.append((cur_title, cur_lines))
+            cur_title, cur_lines = ln[3:].strip(), [ln]
+        else:
+            cur_lines.append(ln)
+    secs.append((cur_title, cur_lines))
+    sized = []
+    for t, ls in secs:
+        if not "\n".join(ls).strip():
+            continue
+        prefix = re.split(r"[（(]", t)[0].strip()
+        label = (prefix if len(prefix) >= 6 else t)[:20].rstrip()
+        sized.append((label, len("\n".join(ls).encode("utf-8"))))
+    sized.sort(key=lambda x: x[1], reverse=True)
+    return " / ".join(f"「{t}」{b}B" for t, b in sized[:k])
+
+
+def collect_review_files(root: Path) -> list[Path]:
+    found: list[Path] = []
+    for sub in ("文档", "reports"):
+        base = root / sub
+        if not base.is_dir():
+            continue
+        for fp in sorted(base.rglob("*.md")):
+            rel_parts = fp.relative_to(base).parts[:-1]
+            if any(
+                p in SKIP_REVIEW_DIRS or p.startswith("_") or p.endswith("_DEPRECATED")
+                for p in rel_parts
+            ):
+                continue
+            if fp.stem.endswith("_DEPRECATED"):
+                continue
+            if "复核" in fp.stem:
+                found.append(fp)
+    return found
 
 
 def line_checks(root: Path, days: int, today: date) -> None:
@@ -169,10 +267,10 @@ def line_checks(root: Path, days: int, today: date) -> None:
     conflict = bool(tldr_date and sec3_date and tldr_date < sec3_date - timedelta(days=1))
     add("H009", "TL;DR 日期与 §3 不矛盾", not conflict, f"TL;DR {tldr_date} vs §3 {sec3_date}")
 
-    advisories(root, agents, status, sec4)
+    advisories(root, agents, status, sec4, today)
 
 
-def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
+def advisories(root: Path, agents: str, status: str, sec4: str, today: date) -> None:
     registry = "决策登记表" in agents or "决策登记表" in status or (root / "文档" / "决策登记表.md").is_file()
     add("A001", "决策登记表存在", registry, "" if registry else "具约束力的决策应收口到一张可 grep 的表", True)
 
@@ -192,7 +290,11 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
            (("AGENTS.md", agents, 25_000), ("STATUS.md", status, 40_000), ("任务卡_README.md", index, 15_000))
            if len(t.encode("utf-8")) > limit]
     add("A003", "AGENTS ≤25KB、STATUS ≤40KB、任务卡索引 ≤15KB", not big,
-        ", ".join(big) + ("；旧段原样移到 文档/*_归档_至<日期>.md，入口留一行 > 引用（不要写成带日期的标题）" if big else ""), True)
+        ", ".join(big) + (
+            "；运行 python scripts/archive_status.py 归档 STATUS 旧段与 AGENTS §3 旧条"
+            "（原样移到 文档/*_归档_至<日期>.md，入口留一行 > 引用，不要写成带日期的标题）"
+            if big else ""
+        ), True)
 
     checked = len(re.findall(r"(?m)^\s*[-*]\s*\[[xX]\]", sec4))
     unchecked = len(re.findall(r"(?m)^\s*[-*]\s*\[\s?\]", sec4))
@@ -214,11 +316,13 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
         text = read(fp)
         size = len(text.encode("utf-8"))
         prompts = len(PROMPT_HEAD_RE.findall(text))
-        if size > 15_000 or prompts > 3:
+        if size > 15_000:
+            bloated.append(f"{fp.name}（{size // 1000}KB，{prompts} 段提示词；最大三节：{top_card_sections(text)}）")
+        elif prompts > 3:
             bloated.append(f"{fp.name}（{size // 1000}KB，{prompts} 段提示词）")
     add("A006", "任务卡 ≤15KB、提示词段 ≤3", not bloated,
-        (f"{len(bloated)} 张：" + "、".join(bloated[:5]) + ("…" if len(bloated) > 5 else "")
-         + "；就地改、删用过的提示词，该开新卡的开新卡（见 任务卡_README.md 卡面规矩）") if bloated else "", True)
+        (f"{len(bloated)} 张：" + "；".join(bloated[:6]) + ("…" if len(bloated) > 6 else "")
+         + "；超限部分该挪到 STATUS 或开新卡，就地改并删用过的提示词（见 任务卡_README.md 卡面规矩）") if bloated else "", True)
 
     states = card_states(cards)
     sec3 = section(agents, "3", {"现在在哪", "Where We Are Now"})
@@ -272,6 +376,38 @@ def advisories(root: Path, agents: str, status: str, sec4: str) -> None:
     add("A010", "§3 每条 ≤600 字", not wordy,
         ("；".join(wordy[:4]) + ("…" if len(wordy) > 4 else "")
          + "；细节写进 STATUS，§3 只留累计快照；不要往 §3 追加执行方交回长段") if wordy else "", True)
+
+    blocks = handoff_blocks(status)
+    if not blocks:
+        add("A011", "STATUS 最新交接段 ≤800 字且四节齐", False,
+            "未找到交接段（标题须含 Handoff 或以 YYYY-MM-DD 开头）", True)
+    else:
+        d_first, d_last = latest(blocks[0], today), latest(blocks[-1], today)
+        latest_seg = blocks[0] if (d_first and d_last and d_first > d_last) else blocks[-1]
+        seg_len = len(latest_seg.strip())
+        unfence_seg = strip_fenced(latest_seg)
+        missing_secs = [label for label, pat in HANDOFF_SECTIONS if not pat.search(unfence_seg)]
+        a011_ok = seg_len <= 800 and not missing_secs
+        if a011_ok:
+            a011_detail = f"{seg_len} 字，四节齐"
+        else:
+            parts = [f"最新交接段 {seg_len} 字" + ("（超 800 字）" if seg_len > 800 else "")]
+            if missing_secs:
+                parts.append("缺节：" + "、".join(missing_secs))
+            parts.append("须含“改了什么 / 怎么验证的 / 没做什么 / 不确定处”四节且 ≤800 字")
+            a011_detail = "；".join(parts)
+        add("A011", "STATUS 最新交接段 ≤800 字且四节齐", a011_ok, a011_detail, True)
+
+    review_files = collect_review_files(root)
+    bad_reviews = []
+    for fp in review_files:
+        non_empty = [ln.strip() for ln in read(fp).splitlines() if ln.strip()]
+        if not non_empty or non_empty[-1] not in ("PASS", "NEEDS_FIX"):
+            bad_reviews.append(fp.name)
+    add("A012", "复核报告末尾有单独一行 PASS 或 NEEDS_FIX", not bad_reviews,
+        (f"{len(bad_reviews)} 份缺结论行：" + "、".join(bad_reviews[:5]) + ("…" if len(bad_reviews) > 5 else "")
+         + "；复核报告末尾须单独一行只写 PASS 或 NEEDS_FIX")
+        if bad_reviews else (f"{len(review_files)} 份复核报告" if review_files else "暂无复核报告"), True)
 
 
 def card_re(cid: str) -> re.Pattern[str]:
