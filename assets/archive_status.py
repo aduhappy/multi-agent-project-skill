@@ -268,10 +268,15 @@ def archive_agents_sec3(root: Path, agents_keep: int, today: date, dry_run: bool
     flush()
 
     archivable = [(idx, blk) for idx, (kind, blk) in enumerate(entries) if kind == "archivable"]
-    if len(archivable) <= agents_keep:
+    trailer_bullets = sum(
+        1 for kind, blk in entries
+        if kind == "trailer" and blk and re.match(r"^[-*]\s+(?!`?→)", blk[0])
+    )
+    snap_budget = max(1, agents_keep - trailer_bullets)
+    if len(archivable) <= snap_budget:
         if before_bytes > 25_000:
             print(
-                f"AGENTS.md：{before_bytes}B（>25KB），但 §3 可归档快照仅 {len(archivable)} 条（≤ {agents_keep}），"
+                f"AGENTS.md：{before_bytes}B（>25KB），但 §3 总条数 {len(archivable) + trailer_bullets}（≤ {agents_keep}），"
                 "体积主要在 §3.5 决策登记表等其他节（可按 §3.5 说明迁出全文）。"
             )
         return
@@ -287,7 +292,7 @@ def archive_agents_sec3(root: Path, agents_keep: int, today: date, dry_run: bool
         tie = -pos if reverse_chrono else pos
         scored.append(((d or date.min, tie), entry_idx))
     scored.sort(key=lambda x: x[0], reverse=True)
-    keep_indices = {entry_idx for _, entry_idx in scored[:agents_keep]}
+    keep_indices = {entry_idx for _, entry_idx in scored[:snap_budget]}
 
     to_archive_blocks = ["\n".join(blk).rstrip() for idx, (kind, blk) in enumerate(entries)
                          if kind == "archivable" and idx not in keep_indices]
@@ -320,7 +325,7 @@ def archive_agents_sec3(root: Path, agents_keep: int, today: date, dry_run: bool
     if dry_run:
         print(
             f"[DRY-RUN] AGENTS.md §3：将归档 {len(to_archive_blocks)} 条 → {rel_arch}，"
-            f"保留 {agents_keep} 条；体积 {before_bytes}B → {after_bytes}B。"
+            f"保留 {len(keep_indices)} 条快照（含阻塞共 {len(keep_indices) + trailer_bullets} 条）；体积 {before_bytes}B → {after_bytes}B。"
         )
         return
 
@@ -333,7 +338,7 @@ def archive_agents_sec3(root: Path, agents_keep: int, today: date, dry_run: bool
     agents_path.write_text(new_agents, encoding="utf-8")
     print(
         f"AGENTS.md §3：已归档 {len(to_archive_blocks)} 条 → {rel_arch}，"
-        f"保留 {agents_keep} 条；体积 {before_bytes}B → {after_bytes}B。"
+        f"保留 {len(keep_indices)} 条快照（含阻塞共 {len(keep_indices) + trailer_bullets} 条）；体积 {before_bytes}B → {after_bytes}B。"
     )
 
 

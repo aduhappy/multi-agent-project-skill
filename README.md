@@ -105,20 +105,21 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 - 多线项目每条线：`assets/AGENTS.md` → `<线目录>/AGENTS.md`
 - `assets/任务规划_模板.md` → 任务卡（一个任务一张卡，执行与独立复核同卡、各带派发提示词）
 - `assets/任务卡_README.md` → `文档/任务卡_README.md`（任务卡索引与卡面规矩）
+- `assets/环境坑.md` → `文档/环境坑.md`（可选：软件与环境避坑单一来源）
 - `assets/来源.txt` → 各数据集目录
-- `assets/check_handoff.py` → 项目 `scripts/check_handoff.py`
+- `assets/check_handoff.py`、`assets/archive_status.py` → 项目 `scripts/`
 
 > ⚠️ 中文文件名注意：如果你的 toolchain 对中文路径挑剔，在**你自己的项目里**改用 ASCII 文件名并更新线级入口指针；不要改变本 skill 的安装目录 `multi-agent-project`。
 
 
-`check_handoff.py` 收工自检：线级运行 `python ../scripts/check_handoff.py`（脚本在线目录里就去掉 `../`），查 §3 日期新鲜、TL;DR 已填、STATUS 非模板、STATUS 日期 ≥ §3、§4 看板、薄指针；另有 10 条只提示不阻断的提醒（决策登记表、多脚本常量漂移、入口与索引体积、看板全未勾、任务卡缺派发提示词、任务卡过大、卡面状态与看板／索引对不上、§3 超 5 条或挂着已收口卡、“进度回写”单行或 §3 单条过长）。多线课题的根目录用 `--scope index` 查索引。项目里若有不认识 `--scope` 的旧副本，先整体替换成本版。技能仓库自身运行 `python tests/test_skill.py`。
+`check_handoff.py` 收工自检：线级运行 `python ../scripts/check_handoff.py`（脚本在线目录里就去掉 `../`），查 §3 日期新鲜、TL;DR 已填、STATUS 非模板、STATUS 日期 ≥ §3、§4 看板、薄指针；另有 12 条只提示不阻断的提醒（决策登记表、多脚本常量漂移、入口与索引体积、看板全未勾、任务卡缺派发提示词、任务卡过大并列最大三节、卡面状态与看板／索引对不上、§3 超 5 条或挂着已收口卡、“进度回写”单行或 §3 单条过长、STATUS 最新交接段 ≤800 字且四节齐、复核报告末尾 `PASS`/`NEEDS_FIX` 结论行）。体积超限时运行 `python scripts/archive_status.py` 一键归档旧段。多线课题的根目录用 `--scope index` 查索引。项目里若有不认识 `--scope` 的旧副本，先整体替换成本版。技能仓库自身运行 `python tests/test_skill.py`。
 
 ## 生成的文件骨架
 
 ```
 <项目根>/
 ├── AGENTS.md                          ← 唯一权威入口（7 板块 + TL;DR + 路径约定）
-├── STATUS.md                          ← 增量 handoff（本轮做了什么/动了哪些文件/踩了什么坑）
+├── STATUS.md                          ← 增量 handoff（每段四节 ≤800 字）
 ├── CLAUDE.md                          ← 薄指针 → "以 AGENTS.md 为准"
 ├── GEMINI.md                          ← 薄指针
 ├── .cursor/rules/multi-agent.mdc      ← 薄指针（Cursor 现代格式，.cursorrules 为 legacy）
@@ -126,7 +127,8 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 ├── 文档/
 │   ├── 任务卡/                           ← 新项目推荐；旧项目可暂留平铺任务卡
 │   │   └── T1_<主题>.md                  ← 自包含任务卡
-│   ├── 任务卡_README.md                   ← 任务卡目录索引（依赖链 + 状态表）
+│   ├── 任务卡_README.md                   ← 任务卡目录索引（依赖链 + 状态表 + 卡面规矩）
+│   ├── 环境坑.md                          ← 软件/环境避坑单一来源（可选）
 │   ├── 决策记录/                      ← 关键技术决策（ADR）
 │   └── 词汇表.md                      ← 项目术语
 ├── <数据集名>/
@@ -134,7 +136,8 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 │   └── ...
 ├── scripts/                           ← 代码归位（不散落根目录）
 │   ├── README.md                      ← 脚本索引：干嘛/输入/输出/作者
-│   └── check_handoff.py               ← 收工交接自检脚本
+│   ├── check_handoff.py               ← 收工交接自检脚本
+│   └── archive_status.py              ← STATUS 与 AGENTS §3 一键归档脚本
 └── 进度日志.md                        ← 带日期戳的变更流水
 ```
 

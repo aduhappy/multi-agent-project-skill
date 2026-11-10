@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Smoke test for check_handoff.py: builds a tiny root index + line in a temp dir."""
+"""Smoke and regression tests for check_handoff.py, archive_status.py, and skill assets."""
 from __future__ import annotations
 
 import os
@@ -9,7 +9,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-CHECKER = Path(__file__).resolve().parents[1] / "assets" / "check_handoff.py"
+REPO = Path(__file__).resolve().parents[1]
+CHECKER = REPO / "assets" / "check_handoff.py"
+ARCHIVER = REPO / "assets" / "archive_status.py"
 TODAY = "2026-09-15"
 
 
@@ -20,6 +22,15 @@ def run(root: Path, *args: str) -> tuple[int, str]:
         capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
     )
     return result.returncode, result.stdout
+
+
+def run_archiver(root: Path, *args: str) -> tuple[int, str, str]:
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
+    result = subprocess.run(
+        [sys.executable, "-B", str(ARCHIVER), str(root), "--today", TODAY, *args],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
+    )
+    return result.returncode, result.stdout, result.stderr
 
 
 def write(path: Path, text: str) -> None:
@@ -44,7 +55,222 @@ def check(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
+def test_asset_sizes() -> None:
+    for rel, limit in (
+        ("SKILL.md", 15_000),
+        ("assets/任务卡_README.md", 15_000),
+        ("assets/任务规划_模板.md", 15_000),
+    ):
+        fp = REPO / rel
+        size = len(fp.read_bytes())
+        check(size <= limit, f"{rel} exceeded {limit} bytes: {size}B")
+
+
+def test_040_features() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        line = build(root)
+
+        # --- A4: A006 lists largest 3 sections when card > 15KB (and ignores fenced ## headings) ---
+        big_card = line / "文档" / "任务卡" / "T2_方法.md"
+        write(
+            big_card,
+            "# T2 方法\n\n"
+            "## 进度回写\n- 状态：⬜可派\n\n"
+            + "## 第一大节\n" + ("甲" * 3200) + "\n\n"
+            + "## 第二大节\n" + ("乙" * 2000) + "\n\n"
+            + "## 📋 执行方派发提示词\n````text\n做\n## 假标题不能算独立节\n" + ("丙" * 1200) + "\n````\n\n"
+            + "## 📋 独立复核方派发提示词\n````text\n核\n````\n",
+        )
+        rc, out = run(line)
+        check(rc == 0 and "[A006] ⚠️" in out, "oversized card must warn A006:\n" + out)
+        check(
+            "最大三节：「第一大节」" in out and "「第二大节」" in out and "「📋 执行方派发提示词」" in out,
+            "A006 must list largest 3 sections in order:\n" + out,
+        )
+        check("假标题" not in out, "fenced ## heading inside 4-backtick prompt must not be treated as a section:\n" + out)
+        big_card.unlink()
+
+        # --- A2: A011 latest handoff <= 800 chars and 4 sections present ---
+        handoff_prefix = (
+            "## Handoff（2026-09-15）\n"
+            "- **谁做的**：工具 Antigravity / 模型 Gemini / 家族 Google；角色：执行方\n"
+            "- **改了什么**：完成初稿。\n"
+            "- **怎么验证的**：`python check.py` 输出 OK。\n"
+            "- **没做什么**：无。\n"
+            "- **不确定处**："
+        )
+        for target_len, expect in ((800, "✅"), (801, "⚠️")):
+            pad = "字" * (target_len - len(handoff_prefix))
+            write(line / "STATUS.md", "# STATUS\n\n" + handoff_prefix + pad + "\n")
+            rc, out = run(line)
+            check(
+                rc == 0 and f"[A011] {expect}" in out,
+                f"handoff of {target_len} chars must give A011 {expect}:\n" + out,
+            )
+            if target_len == 801:
+                check("801 字（超 800 字）" in out, "A011 must report 801 chars over limit:\n" + out)
+
+        # Missing one of the 4 sections (怎么验证的)
+        write(
+            line / "STATUS.md",
+            "# STATUS\n\n## Handoff（2026-09-15）\n"
+            "- **谁做的**：主控\n- **改了什么**：建卡。\n- **没做什么**：无。\n- **不确定处**：无。\n",
+        )
+        rc, out = run(line)
+        check(rc == 0 and "[A011] ⚠️" in out and "缺节：怎么验证的" in out,
+              "handoff missing 怎么验证的 must warn A011:\n" + out)
+
+        # Subheading `### ` form + template trailing `> ⚠️` note must also pass A011
+        write(
+            line / "STATUS.md",
+            "# STATUS\n\n## Handoff（2026-09-15）\n"
+            "- **谁做的**：执行方\n"
+            "### 改了什么\n新增脚本。\n"
+            "### 怎么验证的\n`pytest` 0 failed。\n"
+            "### 没做什么\n无。\n"
+            "### 不确定处\n无。\n\n"
+            "> ⚠️ 任务执行中以任务卡“进度回写”为准。\n",
+        )
+        rc, out = run(line)
+        check(rc == 0 and "[A011] ✅" in out, "### 4-section handoff with trailing template note must pass A011:\n" + out)
+
+        # --- A3: A012 review report trailing standalone PASS / NEEDS_FIX ---
+        rc, out = run(line)
+        check("[A012] ✅" in out and "暂无复核报告" in out, "no review files must pass A012:\n" + out)
+
+        rev1 = line / "文档" / "T1_独立复核_GLM_2026-09-15.md"
+        rev2 = line / "文档" / "T2_复核_Gemini_2026-09-15.md"
+        card_with_fuhe = line / "文档" / "任务卡" / "T3_口径复核.md"
+        deprecated_rev = line / "文档" / "_作废" / "T0_复核_old.md"
+
+        write(rev1, "# T1 复核\n\n## 会出错\n无\n\n## 建议\n无\n\nPASS\n\n")
+        write(rev2, "# T2 复核\n\n## 会出错\n1. 错（出错场景：空输入崩溃）\n\n## 建议\n无\n\nNEEDS_FIX\n")
+        write(card_with_fuhe, "# T3 口径复核\n\n## 📋 执行方派发提示词\n做\n\n## 📋 复核方派发提示词\n核\n")
+        write(deprecated_rev, "# 旧复核\n没有结论行也不应报错\n")
+        rc, out = run(line)
+        check(rc == 0 and "[A012] ✅" in out and "2 份复核报告" in out,
+              "PASS and NEEDS_FIX review reports (ignoring task card & _作废) must pass A012:\n" + out)
+
+        write(rev2, "# T2 复核\n\n总体通过，无须返修。\n")
+        rc, out = run(line)
+        check(rc == 0 and "[A012] ⚠️" in out and "T2_复核_Gemini_2026-09-15.md" in out,
+              "review report without PASS/NEEDS_FIX must warn A012:\n" + out)
+
+        write(rev2, "# T2 复核\n\n结论：PASS\n")
+        rc, out = run(line)
+        check(rc == 0 and "[A012] ⚠️" in out and "T2_复核_Gemini_2026-09-15.md" in out,
+              "non-standalone PASS line must warn A012:\n" + out)
+        write(rev2, "# T2 复核\n\n## 会出错\n无\n\n## 建议\n无\n\nPASS\n")
+
+        # --- A1: archive_status.py pass and fail cases ---
+        arc_rc, _, _ = run_archiver(root / "does_not_exist")
+        check(arc_rc == 2, "archive_status on missing dir must exit 2")
+        arc_rc, _, _ = run_archiver(line, "--keep", "0")
+        check(arc_rc == 2, "archive_status with --keep 0 must exit 2")
+        empty_dir = root / "empty_dir"
+        empty_dir.mkdir()
+        arc_rc, _, _ = run_archiver(empty_dir)
+        check(arc_rc == 2, "archive_status on dir without STATUS/AGENTS must exit 2")
+
+        # No-op when <= 10 handoffs and <= 5 §3 items
+        before_status = (line / "STATUS.md").read_text(encoding="utf-8")
+        arc_rc, arc_out, _ = run_archiver(line)
+        check(arc_rc == 0 and "无需归档" in arc_out, "small STATUS must no-op cleanly:\n" + arc_out)
+        check((line / "STATUS.md").read_text(encoding="utf-8") == before_status, "no-op must not touch STATUS.md")
+
+        # Oversized STATUS.md (> 40KB, 14 sections from 2026-09-02 to 2026-09-15)
+        many_blocks = []
+        for day in range(2, 16):
+            d_str = f"2026-09-{day:02d}"
+            filler = "内" * (1100 if day < 15 else 80)
+            many_blocks.append(
+                f"## Handoff（{d_str}，T{day}）\n"
+                f"- **谁做的**：执行方\n"
+                f"- **改了什么**：第 {day} 轮产物 {filler}\n"
+                f"- **怎么验证的**：`python verify.py` 通过\n"
+                f"- **没做什么**：无\n"
+                f"- **不确定处**：无"
+            )
+        write(line / "STATUS.md", "# STATUS.md — 增量 Handoff\n\n> 只记增量。\n\n" + "\n\n".join(many_blocks) + "\n")
+        check(len((line / "STATUS.md").read_bytes()) > 40_000, "fixture STATUS.md must exceed 40KB")
+        rc, out = run(line)
+        check(rc == 0 and "[A003] ⚠️" in out and "STATUS.md" in out and "archive_status.py" in out,
+              "oversized STATUS must warn A003 and suggest archive_status.py:\n" + out)
+
+        # Dry-run must not write
+        arc_rc, arc_out, _ = run_archiver(line, "--dry-run")
+        check(arc_rc == 0 and "[DRY-RUN]" in arc_out, "dry-run must print preview:\n" + arc_out)
+        check(len((line / "STATUS.md").read_bytes()) > 40_000, "dry-run must not shrink STATUS.md")
+
+        # Actual archive (default --keep 10): archives 4 sections (09-02..09-05), keeps 10 (09-06..09-15)
+        arc_rc, arc_out, _ = run_archiver(line)
+        check(arc_rc == 0 and "已归档 4 段" in arc_out, "must archive 4 oldest sections:\n" + arc_out)
+        new_st = (line / "STATUS.md").read_text(encoding="utf-8")
+        check(len(new_st.encode("utf-8")) < 40_000, "archived STATUS.md must be under 40KB")
+        check("> 更早的交接段已归档到 `文档/STATUS_归档_至2026-09-05.md`。" in new_st,
+              "STATUS.md must contain > blockquote reference to archive file:\n" + new_st[:400])
+        arch_file = line / "文档" / "STATUS_归档_至2026-09-05.md"
+        check(arch_file.is_file(), "archive file must be created")
+        arch_text = arch_file.read_text(encoding="utf-8")
+        for day in (2, 3, 4, 5):
+            check(f"2026-09-{day:02d}" in arch_text and f"2026-09-{day:02d}，T{day}" not in new_st,
+                  f"day {day} must move from STATUS.md to archive file")
+        for day in range(6, 16):
+            check(f"2026-09-{day:02d}，T{day}" in new_st, f"recent day {day} must stay in STATUS.md")
+
+        rc, out = run(line)
+        check(rc == 0 and "[A003] ✅" in out and "[A011] ✅" in out and "[H006] ✅" in out,
+              "post-archive line must pass H006, A003, and A011:\n" + out)
+
+        # Second archive: first test same-day append (two sections dated 2026-09-05), then different-day link append
+        cur_st = (line / "STATUS.md").read_text(encoding="utf-8").replace("2026-09-06，T6", "2026-09-05，T6_补")
+        write(line / "STATUS.md", cur_st)
+        arc_rc, _, _ = run_archiver(line, "--keep", "9")
+        check(arc_rc == 0, "same-day append archive must succeed")
+        same_day_text = arch_file.read_text(encoding="utf-8")
+        check("2026-09-02，T2" in same_day_text and "2026-09-05，T6_补" in same_day_text,
+              "same-day archive must append without overwriting earlier archived sections")
+        check((line / "STATUS.md").read_text(encoding="utf-8").count("STATUS_归档_至2026-09-05.md") == 1,
+              "same-day archive must not duplicate > reference link in STATUS.md")
+
+        arc_rc, _, _ = run_archiver(line, "--keep", "8")
+        check(arc_rc == 0, "third archive run must succeed")
+        second_arch = line / "文档" / "STATUS_归档_至2026-09-07.md"
+        check(second_arch.is_file() and "2026-09-07" in second_arch.read_text(encoding="utf-8"),
+              "third archive must write new dated file")
+        check(
+            "`文档/STATUS_归档_至2026-09-05.md`、`文档/STATUS_归档_至2026-09-07.md`"
+            in (line / "STATUS.md").read_text(encoding="utf-8"),
+            "existing > archive quote line must append second archive link cleanly",
+        )
+
+        # AGENTS.md §3 archiving when §3 exceeds 5 items (8 snapshots + 1 阻塞 = 9 items -> keeps 4 + 1 = 5 items)
+        sec3_many = "\n".join(f"- ✅ 2026-09-{d:02d}：完成里程碑 {d}" for d in range(8, 16))
+        write(
+            line / "AGENTS.md",
+            "# AGENTS\n\n> **Scope: line**\n\n> ⚡ **TL;DR**\n> - **当前阶段**：初稿（2026-09-15）\n> - **下一步**：写方法\n> - **阻塞**：无\n\n"
+            f"## 3. 现在在哪\n{sec3_many}\n- **阻塞**：无\n- `→ 本轮增量 handoff 见 STATUS.md`\n\n"
+            "## 3.5 决策登记表\n| ID | 决策 |\n|---|---|\n\n"
+            "## 4. 任务看板\n- [x] T1 初稿\n- [ ] **T3 口径复核**\n",
+        )
+        rc, out = run(line)
+        check("[A008] ⚠️" in out and "§3 9 条" in out, "9 bullets in §3 must warn A008 before archive:\n" + out)
+        arc_rc, arc_out, _ = run_archiver(line)
+        check(arc_rc == 0 and "AGENTS.md §3：已归档 4 条" in arc_out, "must archive 4 oldest §3 items:\n" + arc_out)
+        agents_arch = line / "文档" / "AGENTS_归档_至2026-09-11.md"
+        check(agents_arch.is_file() and "里程碑 8" in agents_arch.read_text(encoding="utf-8"),
+              "AGENTS §3 archive file must contain oldest milestones")
+        new_agents = (line / "AGENTS.md").read_text(encoding="utf-8")
+        check("> 更早的 §3 快照已归档到 `文档/AGENTS_归档_至2026-09-11.md`。" in new_agents,
+              "AGENTS.md §3 must include > archive quote line:\n" + new_agents)
+        rc, out = run(line)
+        check(rc == 0 and "[H003] ✅" in out and "[A008] ✅" in out,
+              "archived AGENTS.md §3 must pass H003 and A008:\n" + out)
+
+
 def main() -> int:
+    test_asset_sizes()
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         line = build(root)
@@ -159,6 +385,8 @@ def main() -> int:
         (line / "CLAUDE.md").write_text("以 README.md 为准，AGENTS.md 已废弃。\n", encoding="utf-8")
         rc, out = run(line)
         check("[H007] ❌" in out, "retired pointer must fail:\n" + out)
+
+    test_040_features()
     print("All skill self-tests passed.")
     return 0
 
