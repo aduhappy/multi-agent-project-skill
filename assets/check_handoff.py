@@ -658,7 +658,9 @@ def advisories(
 
     cards_dir = root / cfg.cards_dir
     cards_dir_exists = cards_dir.is_dir()
-    cards = sorted(cards_dir.glob("*.md")) if cards_dir_exists else []
+    raw_cards = sorted(cards_dir.glob("*.md")) if cards_dir_exists else []
+    misplaced_reviews = [fp for fp in raw_cards if "复核" in fp.stem]
+    cards = [fp for fp in raw_cards if "复核" not in fp.stem]
     active_cards: list[tuple[Path, str]] = []
     unparsed_cards: list[str] = []
     lacking: list[str] = []
@@ -927,10 +929,19 @@ def advisories(
     a014_ok, a014_detail = check_agents_placeholders_a014(agents)
     add("A014", "AGENTS.md 无遗留【待填】且“不可混用的维度”已填", a014_ok, a014_detail, True)
 
+    misplaced_note = (
+        f"；复核报告放错目录：{'、'.join(p.name for p in misplaced_reviews[:5])}"
+        + ("…" if len(misplaced_reviews) > 5 else "")
+        + f"（文件名含“复核”不当任务卡查，请移出 {cfg.cards_dir}/）"
+        if misplaced_reviews
+        else ""
+    )
     if not cards_dir_exists:
         a015_ok, a015_detail = False, f"未找到 {cfg.cards_dir}/ 目录，卡类检查（A005—A009）均未执行"
     elif not cards:
-        a015_ok, a015_detail = False, f"{cfg.cards_dir}/ 下有 0 张任务卡，卡类检查（A005—A009）均未执行"
+        a015_ok, a015_detail = False, f"{cfg.cards_dir}/ 下有 0 张任务卡，卡类检查（A005—A009）均未执行{misplaced_note}"
+    elif misplaced_reviews:
+        a015_ok, a015_detail = False, f"{len(cards)} 张任务卡{misplaced_note}"
     else:
         a015_ok, a015_detail = True, f"{len(cards)} 张任务卡"
     add("A015", "任务卡目录存在且非空", a015_ok, a015_detail, True)
@@ -1013,7 +1024,7 @@ def role_checks(root: Path, cfg: hl.HandoffConfig, role: str, card_arg: Optional
     if card_arg:
         target_id = card_arg.strip()
         cards_dir = root / cfg.cards_dir
-        cards = sorted(cards_dir.glob("*.md")) if cards_dir.is_dir() else []
+        cards = [fp for fp in sorted(cards_dir.glob("*.md")) if "复核" not in fp.stem] if cards_dir.is_dir() else []
         matched = [fp for fp in cards if hl.extract_card_id(fp.stem).upper() == target_id.upper()]
         if not matched:
             matched = [fp for fp in cards if fp.stem.upper() == target_id.upper() or fp.name.upper() == target_id.upper()]

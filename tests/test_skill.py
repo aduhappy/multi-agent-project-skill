@@ -433,10 +433,10 @@ def test_r1_a005_skips_closed_and_deprecated() -> None:
             "closed/deprecated cards without prompts must be skipped by A005:\n" + out,
         )
 
-        write(cards_dir / "T3_执行中缺复核.md", "# T3\n\n## 进度回写\n- 状态：⏳执行中\n\n## 📋 执行方派发提示词\n做\n")
+        write(cards_dir / "T3_执行中少提示词.md", "# T3\n\n## 进度回写\n- 状态：⏳执行中\n\n## 📋 执行方派发提示词\n做\n")
         rc, out = run(line)
         check(
-            rc == 0 and "[A005] ⚠️" in out and "T3_执行中缺复核.md" in out
+            rc == 0 and "[A005] ⚠️" in out and "T3_执行中少提示词.md" in out
             and "T1_已收口无提示词.md" not in out and "T1d_已作废无提示词.md" not in out,
             "A005 must flag only active card missing prompt, not closed/deprecated ones:\n" + out,
         )
@@ -2206,6 +2206,29 @@ def test_042_v6_card_id_case_and_collision() -> None:
         )
 
 
+def test_042_v7_misplaced_review_in_cards_dir() -> None:
+    """0.4.2 V7: files containing '复核' inside cards_dir are not checked as cards, and emit a misplaced-review hint."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        cards_dir = line / "文档" / "任务卡"
+        write(
+            cards_dir / "T1_初稿.md",
+            "# T1 初稿\n\n## 进度回写\n- 状态：✅已收口\n\n## 📋 执行方派发提示词\n做\n\n## 📋 独立复核方派发提示词\n核\n",
+        )
+        # Put a review report (no prompts, no 进度回写) into 文档/任务卡/ by mistake
+        write(cards_dir / "T1_复核_SWE2_2026-09-15.md", "# T1 复核\n\n## 会出错\n无\n\n## 建议\n无\n\nPASS\n")
+        rc, out = run(line)
+        check(
+            rc == 0
+            and "[A005] ✅" in out
+            and "[A007] ✅" in out
+            and "[A015] ⚠️" in out
+            and "复核报告放错目录" in out
+            and "T1_复核_SWE2_2026-09-15.md" in out,
+            f"misplaced review in cards_dir must not fail A005/A007 and must warn on A015:\n{out}",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2387,6 +2410,7 @@ def main(argv: list[str] | None = None) -> int:
     test_042_v4_h006_fallback_body_only()
     test_042_v5_h3_progress_section()
     test_042_v6_card_id_case_and_collision()
+    test_042_v7_misplaced_review_in_cards_dir()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")
