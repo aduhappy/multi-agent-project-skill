@@ -3,10 +3,11 @@
 """check_handoff.py — 收工交接自检（multi-agent-project skill 配套）
 
 用法：
-    python scripts/check_handoff.py                    # 以当前目录为线级项目根
-    python scripts/check_handoff.py PATH --days 30     # 指定根、放宽新鲜度窗口
-    python scripts/check_handoff.py PATH --scope index # 多线课题的根索引
-    python scripts/check_handoff.py --version          # 查看脚本版本号
+    python scripts/check_handoff.py                                  # 以当前目录为线级项目根（默认 --role controller）
+    python scripts/check_handoff.py PATH --days 30                   # 指定根、放宽新鲜度窗口
+    python scripts/check_handoff.py PATH --scope index               # 多线课题的根索引
+    python scripts/check_handoff.py PATH --role executor --card T13d # 执行方/复核方收工自检（跳过 AGENTS.md）
+    python scripts/check_handoff.py --version                        # 查看脚本版本号
 
 线级检查（--scope line，默认）：
   H001 AGENTS.md 存在且非空
@@ -922,11 +923,97 @@ def index_checks(root: Path) -> None:
     )
 
 
+def role_checks(root: Path, role: str, card_arg: Optional[str], today: date) -> None:
+    """Checks for --role executor / reviewer: never reads or checks AGENTS.md."""
+    status = hl.read_utf8(root / "STATUS.md")
+    h005_ok, h005_detail = check_status_h005(status, today)
+    add("H005", "STATUS.md 存在且非模板", h005_ok, h005_detail, False)
+
+    blocks = hl.handoff_blocks(status)
+    if not blocks:
+        add(
+            "A011",
+            "STATUS 最近交接段 ≤800 字且四节齐",
+            False,
+            "未找到交接段（仅认 ## 或 ### 标题，#### 及更深标题不算；须含 Handoff/交接，或以日期 / T<卡号>+日期 开头；“交回说明”等不算交接）",
+            False,
+        )
+    else:
+        d_first = hl.block_latest_date(blocks[0], today)
+        d_last = hl.block_latest_date(blocks[-1], today)
+        rev_order = bool(d_first and d_last and d_first > d_last)
+        latest_seg = blocks[0] if rev_order else blocks[-1]
+        seg_doc = hl.parse_markdown(latest_seg)
+        seg_title = (
+            seg_doc.blocks[0].title[:36]
+            if seg_doc.blocks and seg_doc.blocks[0].kind == "heading"
+            else latest_seg.splitlines()[0].lstrip("#").strip()[:36]
+        )
+        seg_len = len(latest_seg.strip())
+        missing_secs = hl.missing_handoff_sections(latest_seg)
+        if seg_len > 800 or missing_secs:
+            seg_issues = [f"{seg_len} 字" + ("（超 800 字）" if seg_len > 800 else "")]
+            if missing_secs:
+                seg_issues.append("缺节：" + "、".join(missing_secs))
+            add(
+                "A011",
+                "STATUS 最近交接段 ≤800 字且四节齐",
+                False,
+                f"「{seg_title}」" + "，".join(seg_issues) + "；须含“改了什么 / 怎么验证的 / 没做什么 / 不确定处”四节且 ≤800 字",
+                False,
+            )
+        else:
+            add("A011", "STATUS 最近交接段 ≤800 字且四节齐", True, f"最新段合规（{seg_len} 字，四节齐）", False)
+
+    if card_arg:
+        target_id = card_arg.strip()
+        cards_dir = root / "文档" / "任务卡"
+        cards = sorted(cards_dir.glob("*.md")) if cards_dir.is_dir() else []
+        matched = [fp for fp in cards if hl.extract_card_id(fp.stem).upper() == target_id.upper()]
+        if not matched:
+            matched = [fp for fp in cards if fp.stem.upper() == target_id.upper() or fp.name.upper() == target_id.upper()]
+        role_label = "执行方" if role == "executor" else "复核方"
+        if not matched:
+            add("A007", f"任务卡 {target_id} 状态行与{role_label}身份已填", False, f"未找到任务卡 {target_id}", False)
+            add("A009", "本卡“进度回写”每行 ≤400 字", False, f"未找到任务卡 {target_id}", False)
+        else:
+            fp = matched[0]
+            card_text = hl.read_utf8(fp)
+            st_mark = hl.parse_card_state(card_text)
+            id_ok, id_detail = hl.check_card_role_identity(card_text, role)
+            card_issues: list[str] = []
+            if st_mark is None:
+                card_issues.append(f"状态行无法解析：{fp.name}")
+            if not id_ok:
+                card_issues.append(f"{fp.name}：{id_detail}")
+            add(
+                "A007",
+                f"任务卡 {target_id} 状态行与{role_label}身份已填",
+                not card_issues,
+                "；".join(card_issues) if card_issues else f"{fp.name} 状态 {st_mark}，{id_detail}",
+                False,
+            )
+            long_rows = [
+                f"{fp.name}「{label}」行 {n_chars} 字"
+                for label, n_chars, _ in hl.extract_card_progress_rows(card_text)
+                if n_chars > 400
+            ]
+            add(
+                "A009",
+                "本卡“进度回写”每行 ≤400 字",
+                not long_rows,
+                ("；".join(long_rows) + "；一句话结果之外的细节写进 STATUS 或结果说明") if long_rows else f"{fp.name} 合规",
+                False,
+            )
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="收工交接自检")
     parser.add_argument("root", nargs="?", default=".")
     parser.add_argument("--days", "-d", type=int, default=7)
     parser.add_argument("--scope", choices=("line", "index"), default="line")
+    parser.add_argument("--role", choices=("controller", "executor", "reviewer"), default="controller")
+    parser.add_argument("--card", help="指定任务卡卡号（如 T13d），配合 --role executor/reviewer 检查本卡")
     parser.add_argument("--today", help="YYYY-MM-DD，覆盖检查日期（测试用）")
     parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args(argv)
@@ -937,14 +1024,23 @@ def main(argv: Optional[list[str]] = None) -> int:
     today = datetime.strptime(args.today, "%Y-%m-%d").date() if args.today else date.today()
 
     findings.clear()
-    if args.scope == "index":
-        index_checks(root)
+    if args.role in ("executor", "reviewer"):
+        card_note = f"与任务卡 {args.card}" if args.card else "（未传 --card，跳过单卡检查）"
+        print(
+            f"角色={args.role}（已跳过 AGENTS.md 全部检查项 H001–H004/H006–H009 及主控全局项，仅查 STATUS.md 最近交接段{card_note}）"
+        )
+        role_checks(root, args.role, args.card, today)
+        print("=" * 60)
+        print(f"  收工交接自检 | role={args.role}" + (f" | card={args.card}" if args.card else "") + f" | today={today}")
+        print("=" * 60)
     else:
-        line_checks(root, args.days, today)
-
-    print("=" * 60)
-    print(f"  收工交接自检 | scope={args.scope} | today={today}")
-    print("=" * 60)
+        if args.scope == "index":
+            index_checks(root)
+        else:
+            line_checks(root, args.days, today)
+        print("=" * 60)
+        print(f"  收工交接自检 | scope={args.scope} | today={today}")
+        print("=" * 60)
     failed = 0
     warned = 0
     for code, name, ok, detail, advisory in findings:

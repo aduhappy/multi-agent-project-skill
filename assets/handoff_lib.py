@@ -762,6 +762,68 @@ def extract_card_progress_rows(text: str) -> list[tuple[str, int, str]]:
     return rows
 
 
+def check_card_role_identity(text: str, role: str) -> tuple[bool, str]:
+    """Check inside 进度回写 that the role's own line ('执行方' or '复核方') has 工具/模型/家族 filled."""
+    role_label = "执行方" if role == "executor" else "复核方"
+    line_re = re.compile(rf"^(?:[-*+][ \t]+)?\**{role_label}\**[ \t]*[:：](.*)$")
+    doc = parse_markdown(text, strip_comments=True)
+    role_rest: Optional[str] = None
+    for b in extract_progress_blocks(doc):
+        if b.kind == "list_item" and b.indent == 0:
+            cands = b.visible_lines(include_code=True)[:1]
+        elif b.kind == "paragraph":
+            cands = [ln for ln in b.visible_lines(include_code=True) if ln and ln[0] not in (" ", "\t", ">")]
+        else:
+            continue
+        for ln in cands:
+            m = line_re.match(ln.strip())
+            if m:
+                role_rest = m.group(1).strip()
+                break
+        if role_rest is not None:
+            break
+
+    if role_rest is None:
+        return False, f"缺少“{role_label}”行"
+
+    def _clean_val(v: str) -> str:
+        s = strip_placeholder_spans(v).strip(" \t—–-:：;；,，。/|.·()（）[]【】<>")
+        if not s or PLACEHOLDER_RE.search(v):
+            return ""
+        return s
+
+    fields = ("工具", "模型", "家族")
+    if any(k in role_rest for k in fields):
+        missing: list[str] = []
+        vals: list[str] = []
+        for k in fields:
+            m_brk = re.search(rf"{k}\s*【([^【】]*)】", role_rest)
+            if not m_brk:
+                m_brk = re.search(rf"{k}\s*\[([^\[\]]*)\]", role_rest)
+            if not m_brk:
+                m_brk = re.search(rf"{k}\s*[（(]([^（）()]*)[）)]", role_rest)
+            if m_brk is not None:
+                val = _clean_val(m_brk.group(1))
+            else:
+                m_kv = re.search(rf"{k}\s*[:：]?\s*([^/；;，,\n【\[\(（]+)", role_rest)
+                val = _clean_val(m_kv.group(1)) if m_kv else ""
+            if not val:
+                missing.append(k)
+            else:
+                vals.append(f"{k}={val}")
+        if missing:
+            return False, f"{role_label}未填：{'、'.join(missing)}"
+        return True, " / ".join(vals)
+
+    # Fallback: slash-separated 'Tool / Model / Family' without explicit labels
+    head_clause = re.split(r"[；;]", role_rest)[0]
+    parts = [_clean_val(p) for p in head_clause.split("/")]
+    parts = [p for p in parts if p]
+    if len(parts) >= 3:
+        return True, " / ".join(parts[:3])
+    return False, f"{role_label}未填全工具/模型/家族"
+
+
 def extract_prompt_headings(text: str) -> list[str]:
     doc = parse_markdown(text)
     return [b.title for b in doc.blocks if b.kind == "heading" and PROMPT_TITLE_RE.search(b.title)]

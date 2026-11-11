@@ -1814,6 +1814,103 @@ def test_041_r2_adv3_changelog_notes_bare_jiaohui() -> None:
     check(len(checker_mod.handoff_blocks(with_tid)) == 1, "'## T13c 交回（2026-09-15）' must still count as handoff")
 
 
+def test_042_conv3_role() -> None:
+    """0.4.2 Conv1 & Conv3: missing handoff_lib.py exits 2 with clear message; --role executor/reviewer skips AGENTS.md and checks STATUS + --card."""
+    import shutil
+
+    # Conv1: copying only the two CLI scripts without handoff_lib.py exits 2 with the exact prompt
+    with tempfile.TemporaryDirectory() as temp:
+        isolated = Path(temp) / "scripts"
+        isolated.mkdir(parents=True)
+        shutil.copy2(CHECKER, isolated / "check_handoff.py")
+        shutil.copy2(ARCHIVER, isolated / "archive_status.py")
+        for script_name in ("check_handoff.py", "archive_status.py"):
+            res_no_lib = subprocess.run(
+                [sys.executable, "-B", str(isolated / script_name)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+            )
+            combined = (res_no_lib.stdout or "") + (res_no_lib.stderr or "")
+            check(
+                res_no_lib.returncode == 2 and "请把 handoff_lib.py 一起复制到同一目录" in combined,
+                f"{script_name} without handoff_lib.py must exit 2 with copy hint:\nrc={res_no_lib.returncode}\n{combined}",
+            )
+
+    # Conv3: --role executor / reviewer skips all AGENTS.md checks, checks STATUS + optional --card
+    with tempfile.TemporaryDirectory() as temp:
+        proj = Path(temp)
+        # Deliberately omit AGENTS.md completely (controller mode would fail H001/H003/H004/H006/H008)
+        write(
+            proj / "STATUS.md",
+            "# STATUS.md\n\n"
+            "## Handoff（2026-09-10，旧段故意缺节验证只查最近一段）\n"
+            "- 旧段随便写写但超过五十个字，验证 executor 只查最近一段而不被历史旧段拖累。\n\n"
+            "## Handoff（2026-09-15，T5 交回）\n"
+            "- **谁做的**：工具 Antigravity / 模型 Gemini 4 Carbon / 家族 Google\n"
+            "- **改了什么**：完成 T5 解析。\n"
+            "- **怎么验证的**：测试全过。\n"
+            "- **没做什么**：不推送。\n"
+            "- **不确定处**：无。\n",
+        )
+        rc_ctrl, out_ctrl = run(proj)
+        check(rc_ctrl == 1 and "[H001] ❌" in out_ctrl, "controller without AGENTS.md must fail H001")
+
+        rc_exec, out_exec = run(proj, "--role", "executor")
+        first_ln = out_exec.splitlines()[0] if out_exec.splitlines() else ""
+        check(
+            rc_exec == 0 and "角色=executor" in first_ln and "AGENTS.md" in first_ln and "[H001]" not in out_exec,
+            f"--role executor must pass without AGENTS.md and explain skipped items on line 1:\n{out_exec}",
+        )
+
+        # Add card T5: executor filled, reviewer unfilled
+        card_t5 = proj / "文档" / "任务卡" / "T5_解析模块.md"
+        write(
+            card_t5,
+            "# T5 解析模块\n\n## 进度回写\n\n"
+            "- 状态：🟡待复核\n"
+            "- 执行方：工具【Antigravity】/ 模型【Gemini 4 Carbon】/ 家族【Google】/ 开工【2026-09-15】/ 交回【2026-09-15】；产物【handoff_lib.py】\n"
+            "- 复核方：工具【】/ 模型【】/ 家族【】/ 日期【】；结论【】；报告【】\n",
+        )
+        rc_e_ok, out_e_ok = run(proj, "--role", "executor", "--card", "T5")
+        check(rc_e_ok == 0 and "[A007] ✅" in out_e_ok and "[A009] ✅" in out_e_ok, f"executor with filled T5 must pass:\n{out_e_ok}")
+
+        # Reviewer has not filled 工具/模型/家族 yet -> must fail A007
+        rc_r_bad, out_r_bad = run(proj, "--role", "reviewer", "--card", "T5")
+        check(
+            rc_r_bad == 1 and "复核方未填" in out_r_bad and "角色=reviewer" in out_r_bad.splitlines()[0],
+            f"reviewer with empty 工具/模型/家族 on T5 must fail:\n{out_r_bad}",
+        )
+
+        # Fill reviewer, then make progress row >400 chars -> must fail A009
+        write(
+            card_t5,
+            "# T5 解析模块\n\n## 进度回写\n\n"
+            "- 状态：🔵待收口\n"
+            "- 执行方：工具【Antigravity】/ 模型【Gemini 4 Carbon】/ 家族【Google】\n"
+            "- 复核方：工具【Devin】/ 模型【SWE-2 Max】/ 家族【Cognition】；说明【" + ("核" * 405) + "】\n",
+        )
+        rc_r_long, out_r_long = run(proj, "--role", "reviewer", "--card", "t5")
+        check(rc_r_long == 1 and "[A009] ❌" in out_r_long and "行 " in out_r_long, f"reviewer >400 char row must fail A009:\n{out_r_long}")
+
+        # Fix length, break state line -> must fail A007
+        write(
+            card_t5,
+            "# T5 解析模块\n\n## 进度回写\n\n"
+            "  - 状态：🔵待收口\n"
+            "- 复核方：工具【Devin】/ 模型【SWE-2 Max】/ 家族【Cognition】\n",
+        )
+        rc_r_nostate, out_r_nostate = run(proj, "--role", "reviewer", "--card", "T5")
+        check(rc_r_nostate == 1 and "状态行无法解析" in out_r_nostate, f"unparseable state line must fail A007:\n{out_r_nostate}")
+
+        # Break latest STATUS handoff (>800 chars or missing section) -> must fail A011
+        write(
+            proj / "STATUS.md",
+            "# STATUS.md\n\n## Handoff（2026-09-15，缺节交接）\n"
+            "- **谁做的**：复核方\n- **改了什么**：写了超过五十个字的报告内容以通过非模板检查但故意漏掉后面三节。\n",
+        )
+        rc_bad_st, out_bad_st = run(proj, "--role", "reviewer")
+        check(rc_bad_st == 1 and "[A011] ❌" in out_bad_st and "缺节" in out_bad_st, f"missing handoff sections must fail in reviewer role:\n{out_bad_st}")
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -1985,6 +2082,8 @@ def main(argv: list[str] | None = None) -> int:
     test_r1_h004_prose_vs_template_placeholders()
     test_r1_asset_keywords_and_restored_refs()
     test_r1_a003_distinguishes_status_vs_agents()
+
+    test_042_conv3_role()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")
