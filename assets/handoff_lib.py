@@ -53,6 +53,14 @@ PLACEHOLDER_SPAN_RE = re.compile(
     r"|YYYY\s*年\s*MM\s*月\s*DD\s*日",
     re.I,
 )
+_INLINE_DATE_EXPR = r"20\d{2}(?:[-/.]\d{1,2}[-/.]\d{1,2}|\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)"
+BARE_DATE_EXAMPLE_RE = re.compile(
+    rf"(?:(?:例|示例)\s*[:：]?\s*T[0-9A-Za-z]+\s*进行中|e\.g\.[,\s:]*T[0-9A-Za-z]+\s+in\s+progress)"
+    rf"(?:\s*(?:[（(][^）)\n]*[）)]|{_INLINE_DATE_EXPR}))?"
+    rf"|(?:最近完成的事，带日期[。，,\s]*)?(?:例|示例|e\.g\.)\s*[:：,]?\s*{_INLINE_DATE_EXPR}"
+    r"(?:\s*[:：]?\s*(?:数据集\s*X|Dataset\s*X)[^\n；;。）)]*)?",
+    re.I,
+)
 PLACEHOLDER_RE = re.compile(
     r"【待填|【TODO|TODO】|\[TODO\b|<TODO\b|YYYY-MM-DD|<fill|\[fill|<待填|\[待填"
     r"|例\s*T3\s*进行中"
@@ -732,8 +740,9 @@ def parse_markdown(text: str, *, strip_comments: Optional[bool] = None) -> Parse
 
 
 def strip_placeholder_spans(text: str) -> str:
-    """Remove inline placeholder spans (e.g. 【待填：...】, [TODO: ...], YYYY-MM-DD) while keeping surrounding text."""
-    return PLACEHOLDER_SPAN_RE.sub(" ", text)
+    """Remove inline placeholder spans and bare template example dates while keeping surrounding text."""
+    cleaned = PLACEHOLDER_SPAN_RE.sub(" ", text)
+    return BARE_DATE_EXAMPLE_RE.sub(" ", cleaned)
 
 
 def scan_dates(text: str) -> tuple[list[date], list[str]]:
@@ -1271,7 +1280,8 @@ def extract_sec3_info(agents_text: str, today: date) -> Sec3Info:
             vis_lines.extend(b.visible_lines(include_code=False))
 
     has_placeholder = any(
-        PLACEHOLDER_SPAN_RE.search(ln) or PLACEHOLDER_RE.search(ln) for ln in vis_lines
+        PLACEHOLDER_SPAN_RE.search(ln) or PLACEHOLDER_RE.search(ln) or BARE_DATE_EXAMPLE_RE.search(ln)
+        for ln in vis_lines
     )
     real_text = strip_placeholder_spans("\n".join(vis_lines))
     sec3_date = latest_date(real_text, today)

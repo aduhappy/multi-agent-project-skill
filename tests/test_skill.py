@@ -2048,6 +2048,50 @@ def test_042_v1_comment_boundaries() -> None:
             )
 
 
+def test_042_v2_bare_placeholder_dates() -> None:
+    """0.4.2 V2: bare template-example dates (e.g. '例 T3 进行中（2026-06-15）', '例 2026-06-15：数据集 X...') excluded from §3 and TL;DR dates."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(
+            line / "STATUS.md",
+            "# STATUS\n\n## Handoff（2026-11-11，最新交接）\n"
+            "- **谁做的**：主控\n- **改了什么**：更新。\n- **怎么验证的**：通过。\n- **没做什么**：无。\n- **不确定处**：无。\n",
+        )
+        # Exact R2 S2-g scenario: TL;DR has bare '例 T3 进行中（2026-06-15）', §3 has real 2026-11-10 -> H009 must NOT read 2026-06-15
+        agents_s2g = (
+            "# AGENTS\n\n> **Scope: line**\n\n> ⚡ **TL;DR**\n"
+            "> - **当前阶段**：例 T3 进行中（2026-06-15）\n> - **下一步**：派 T4\n> - **阻塞**：无\n\n"
+            "## 3. 现在在哪\n- ✅ 2026-11-10：底座完成\n\n"
+            "## 3.5 决策登记表\n| ID | 决策 |\n|---|---|\n\n## 4. 任务看板\n- [x] T1 初稿\n"
+        )
+        write(line / "AGENTS.md", agents_s2g)
+        res = subprocess.run(
+            [sys.executable, "-B", str(CHECKER), str(line), "--today", "2026-11-11"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(
+            "[H009] ✅" in res.stdout and "2026-06-15" not in res.stdout,
+            f"bare '例 T3 进行中（2026-06-15）' must not leak 2026-06-15 into H009:\n{res.stdout}",
+        )
+
+        # Bare §3 template sentence without 【待填】 brackets -> §3 date must be None ('§3 还是模板占位'), not 2026-06-15
+        agents_sec3_bare = (
+            "# AGENTS\n\n> **Scope: line**\n\n> ⚡ **TL;DR**\n"
+            "> - **当前阶段**：底座推进中\n> - **下一步**：清洗数据\n> - **阻塞**：无\n\n"
+            "## 3. 现在在哪\n- ✅ 最近完成的事，带日期。例 2026-06-15：数据集 X 已下载清洗，落在 data/\n\n"
+            "## 3.5 决策登记表\n| ID | 决策 |\n|---|---|\n\n## 4. 任务看板\n- [x] T1 初稿\n"
+        )
+        write(line / "AGENTS.md", agents_sec3_bare)
+        res2 = subprocess.run(
+            [sys.executable, "-B", str(CHECKER), str(line), "--today", "2026-11-11"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(
+            "2026-06-15" not in res2.stdout and "§3 还是模板占位" in res2.stdout,
+            f"bare §3 example sentence must report 还是模板占位 without 2026-06-15:\n{res2.stdout}",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2224,6 +2268,7 @@ def main(argv: list[str] | None = None) -> int:
     test_042_conv4_config()
     test_042_conv5_archive_keep_active_cards()
     test_042_v1_comment_boundaries()
+    test_042_v2_bare_placeholder_dates()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")
