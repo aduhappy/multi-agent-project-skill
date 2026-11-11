@@ -1793,8 +1793,8 @@ def test_041_r2_adv2_7_h4_excluded_in_docs_and_a011() -> None:
             check(len(checker_mod.handoff_blocks(deep_status)) == 0, f"{deep_head} must not form a handoff block")
             rc, out = run(line)
             check(
-                rc == 0 and "[A011] ⚠️" in out and "####" in out and "不算" in out,
-                f"A011 warning on {deep_head} must explicitly note #### headings do not count:\n{out}",
+                rc == 1 and "[H006] ❌" in out and "[A011] ⚠️" in out and "####" in out and "不算" in out,
+                f"A011 warning on {deep_head} must note #### headings do not count, and V4 H006 must not fall back to heading date:\n{out}",
             )
 
 
@@ -2127,6 +2127,35 @@ def test_042_v3_commented_handoff_headings() -> None:
         )
 
 
+def test_042_v4_h006_fallback_body_only() -> None:
+    """0.4.2 V4: When STATUS has no handoff blocks, H006 fallback ignores non-handoff headings and labels body fallback source."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        # Case 1: Only non-handoff heading '## 附录（2026-09-15）' has >= §3 date; body has older 2026-09-01 -> H006 MUST FAIL
+        write(
+            line / "STATUS.md",
+            "# STATUS.md\n\n## 附录（2026-09-15）\n"
+            "本节只是背景附录文字，建档正文日期是 2026-09-01，用来验证非交接小节标题里的日期不能顶替交接日期通过检查。\n",
+        )
+        rc1, out1 = run(line)
+        check(
+            rc1 == 1 and "[H006] ❌" in out1 and "STATUS 正文" in out1 and "2026-09-01" in out1,
+            f"non-handoff heading date 2026-09-15 must not satisfy H006 fallback:\n{out1}",
+        )
+
+        # Case 2: Body has valid >= §3 date 2026-09-15 without handoff blocks -> H006 passes and explicitly states source
+        write(
+            line / "STATUS.md",
+            "# STATUS.md\n\n## 背景说明\n"
+            "本文件尚无交接段标题，但在正文里记录了最新建档推进日期 2026-09-15，应走正文兜底并写明来源。\n",
+        )
+        rc2, out2 = run(line)
+        check(
+            rc2 == 0 and "[H006] ✅" in out2 and "来自 STATUS 正文兜底" in out2,
+            f"H006 fallback pass must explicitly state date comes from STATUS 正文:\n{out2}",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2305,6 +2334,7 @@ def main(argv: list[str] | None = None) -> int:
     test_042_v1_comment_boundaries()
     test_042_v2_bare_placeholder_dates()
     test_042_v3_commented_handoff_headings()
+    test_042_v4_h006_fallback_body_only()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")

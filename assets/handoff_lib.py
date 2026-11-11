@@ -1191,15 +1191,16 @@ def handoffs_latest_date(blocks: list[str], today: date) -> Optional[date]:
 
 
 def status_fallback_scan(status: str, today: date) -> tuple[Optional[date], list[date], list[str], str]:
-    """Scan fallback dates in STATUS.md when no dated handoff block exists."""
+    """Scan fallback dates in STATUS.md body text only (excluding all headings, code, and comments)."""
     doc = parse_markdown(status)
     lines_buf: list[str] = []
     for b in doc.blocks:
-        if b.kind in ("fenced_code", "indented_code", "html_comment"):
+        if b.kind in ("fenced_code", "indented_code", "html_comment", "heading"):
             continue
-        if b.kind == "heading" and re.search(r"归档|archive", b.title, re.I):
-            continue
-        lines_buf.append(b.visible_text(include_code=False))
+        for ln in b.visible_lines(include_code=False):
+            if re.search(r"STATUS_归档_|更早的交接段已归档", ln):
+                continue
+            lines_buf.append(ln)
     joined = "\n".join(lines_buf)
     valid, invalid = scan_dates(joined)
     le_today = [d for d in valid if d <= today]

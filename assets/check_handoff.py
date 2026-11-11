@@ -495,12 +495,24 @@ def line_checks(root: Path, cfg: hl.HandoffConfig, days: int, today: date) -> No
     h005_ok, h005_detail = check_status_h005(status, today)
     add("H005", "STATUS.md 存在且非模板", h005_ok, h005_detail)
 
-    fb_date, st_valid, st_invalid, _ = hl.status_fallback_scan(status, today)
+    fb_date, fb_valid, fb_invalid, fb_src = hl.status_fallback_scan(status, today)
+    used_fallback = handoff_date is None and fb_date is not None
     status_date = handoff_date or fb_date
     h006_ok = bool(status_date and sec3_date and status_date >= sec3_date)
     if h006_ok:
-        h006_detail = f"STATUS {status_date} vs §3 {sec3_date}"
+        if used_fallback:
+            h006_detail = f"STATUS {status_date}（来自 {fb_src}兜底，未找到交接段） vs §3 {sec3_date}"
+        else:
+            h006_detail = f"STATUS {status_date} vs §3 {sec3_date}"
     else:
+        if blocks:
+            blk_vis = "\n".join(
+                hl.non_code_blocks_text(list(hl.parse_markdown(seg).blocks), include_inline_code=False)
+                for seg in blocks
+            )
+            st_valid, st_invalid = hl.scan_dates(blk_vis)
+        else:
+            st_valid, st_invalid = fb_valid, fb_invalid
         st_future = [d for d in st_valid if d > today]
         if status_date is None and sec3_date is None:
             h006_detail = f"STATUS 未读出有效交接日期，且 {sec3_missing_msg}"
@@ -514,9 +526,12 @@ def line_checks(root: Path, cfg: hl.HandoffConfig, days: int, today: date) -> No
             elif blocks:
                 h006_detail = f"STATUS 已识别 {len(blocks)} 段交接但无有效日期（vs §3 {sec3_date}）"
             else:
-                h006_detail = f"STATUS 未找到交接段或有效日期（vs §3 {sec3_date}）"
+                h006_detail = f"STATUS 未找到交接段或正文有效日期（vs §3 {sec3_date}）"
         elif sec3_date is None:
-            h006_detail = f"{sec3_missing_msg}（STATUS 最新交接 {status_date}）"
+            src_note = f"STATUS {status_date}，来自 {fb_src}兜底" if used_fallback else f"STATUS 最新交接 {status_date}"
+            h006_detail = f"{sec3_missing_msg}（{src_note}）"
+        elif used_fallback:
+            h006_detail = f"STATUS 兜底日期（来自 {fb_src}）落后于 §3（{fb_src} {status_date} < §3 {sec3_date}，未找到交接段）"
         else:
             h006_detail = f"STATUS 最新交接日期落后于 §3（STATUS {status_date} < §3 {sec3_date}）"
     add("H006", "STATUS 最新交接日期 >= §3 日期", h006_ok, h006_detail)
