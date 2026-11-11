@@ -37,161 +37,15 @@ for _stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
-DATE_RE = re.compile(r"(?<!\d)(20\d{2}-\d{2}-\d{2})(?!\d)")
-FLEX_DATE_TOKEN_RE = re.compile(
-    r"(?<!\d)(20\d{2})(?:([-/.])(\d{1,2})\2(\d{1,2})(?![-/.]?\d)|\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日)"
-)
-HEADING_DATE_START_RE = re.compile(
-    r"^[\[（(【]?\s*20\d{2}(?:([-/.])\d{1,2}\1\d{1,2}(?![-/.]?\d)|\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)"
-)
-FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
-HEAD_RE = re.compile(r"^\s*(#{1,6})\s+(.*)$")
-HANDOFF_INNER_HEAD_RE = re.compile(
-    r"^(?:[-*+]|\d+[.、)])?\s*[\*【\[]*(?:谁做的|改了什么|怎么验证|没做什么|不确定处)"
-)
-
-
-def detect_eol(raw_bytes: bytes) -> str:
-    crlf = raw_bytes.count(b"\r\n")
-    bare_lf = raw_bytes.count(b"\n") - crlf
-    return "\r\n" if crlf > bare_lf else "\n"
-
-
-def read_utf8_and_eol(path: Path) -> tuple[str, str]:
-    raw_bytes = path.read_bytes()
-    return raw_bytes.decode("utf-8-sig"), detect_eol(raw_bytes)
-
-
-def read_utf8(path: Path) -> str:
-    return path.read_bytes().decode("utf-8-sig")
-
-
-def write_with_eol(path: Path, text: str, eol: str) -> None:
-    norm = text.replace("\r\n", "\n").replace("\r", "\n")
-    out = norm.replace("\n", "\r\n") if eol == "\r\n" else norm
-    path.write_bytes(out.encode("utf-8"))
-
-
-def unfenced_indices(lines: list[str]) -> set[int]:
-    out: set[int] = set()
-    fence_char, fence_len = "", 0
-    for i, ln in enumerate(lines):
-        m = FENCE_RE.match(ln)
-        if not fence_char:
-            if m and (m.group(1)[0] == "~" or "`" not in m.group(2)):
-                fence_char, fence_len = m.group(1)[0], len(m.group(1))
-                continue
-            out.add(i)
-        elif m and m.group(1)[0] == fence_char and len(m.group(1)) >= fence_len and not m.group(2).strip():
-            fence_char, fence_len = "", 0
-    return out
-
-
-def extract_dates(text: str, today: date) -> list[date]:
-    found: list[date] = []
-    for m in FLEX_DATE_TOKEN_RE.finditer(text):
-        year = int(m.group(1))
-        if m.group(3) is not None:
-            month, day = int(m.group(3)), int(m.group(4))
-        else:
-            month, day = int(m.group(5)), int(m.group(6))
-        try:
-            d = date(year, month, day)
-        except ValueError:
-            continue
-        if d <= today:
-            found.append(d)
-    return found
-
-
-def latest_date(text: str, today: date) -> Optional[date]:
-    ds = extract_dates(text, today)
-    return max(ds) if ds else None
-
-
-def is_handoff_title(title: str) -> bool:
-    """Recognized handoff headings: contain Handoff/交接, start with date, or start with T<id> + date.
-    Headings like '## 交回说明' or '## 归档说明' are NOT handoff headings."""
-    t = title.strip()
-    if re.search(r"归档|archive|现状一屏|current\s+snapshot", t, re.I):
-        return False
-    return bool(
-        re.search(r"(?i)handoff|交接", t)
-        or HEADING_DATE_START_RE.match(t)
-        or (re.match(r"^[\[（(【]?\s*T\d+[A-Za-z0-9-]*\b", t, re.I) and FLEX_DATE_TOKEN_RE.search(t))
-    )
-
-
-def _trim_blank_lines(ls: list[str]) -> str:
-    s = 0
-    e = len(ls)
-    while s < e and not ls[s].strip():
-        s += 1
-    while e > s and not ls[e - 1].strip():
-        e -= 1
-    return "\n".join(ls[s:e])
-
-
-def _parse_status_with_gaps(text: str) -> tuple[list[str], list[str], list[str], list[str]]:
-    """Split STATUS.md into (preamble_lines, handoff_blocks, gaps_before_each_block, postamble_lines)."""
-    lines = text.splitlines()
-    unfenced = unfenced_indices(lines)
-    headings: list[tuple[int, int, str]] = []
-    for i in sorted(unfenced):
-        m = HEAD_RE.match(lines[i])
-        if m:
-            headings.append((i, len(m.group(1)), m.group(2).strip()))
-
-    handoff_heads = [
-        (i, lvl, t) for i, lvl, t in headings
-        if lvl in (2, 3) and is_handoff_title(t) and not HANDOFF_INNER_HEAD_RE.match(t)
-    ]
-    if not handoff_heads:
-        return lines, [], [], []
-
-    handoff_starts = {i for i, _, _ in handoff_heads}
-    first_start = handoff_heads[0][0]
-    preamble = lines[:first_start]
-
-    blocks: list[str] = []
-    gaps: list[str] = []
-    postamble: list[str] = []
-    prev_end = first_start
-    for idx, (start, cur_lvl, _) in enumerate(handoff_heads):
-        gap_str = _trim_blank_lines(lines[prev_end:start]) if idx > 0 else ""
-        gaps.append(gap_str)
-        next_end = next(
-            (
-                i for i, lvl, t in headings
-                if i > start
-                and (
-                    i in handoff_starts
-                    or lvl < cur_lvl
-                    or (lvl == cur_lvl and not HANDOFF_INNER_HEAD_RE.match(t))
-                )
-            ),
-            len(lines),
-        )
-        seg_lines = lines[start:next_end]
-        if idx == len(handoff_heads) - 1:
-            trailing_non_handoff = lines[next_end:]
-            while seg_lines and not seg_lines[-1].strip():
-                seg_lines.pop()
-            footer_tmp: list[str] = []
-            while seg_lines and re.match(r"^>\s*⚠️", seg_lines[-1].strip()):
-                footer_tmp.append(seg_lines.pop())
-                while seg_lines and not seg_lines[-1].strip():
-                    seg_lines.pop()
-            postamble = list(reversed(footer_tmp)) + trailing_non_handoff
-        blocks.append(_trim_blank_lines(seg_lines))
-        prev_end = next_end
-    return preamble, blocks, gaps, postamble
-
-
-def parse_status(text: str) -> tuple[list[str], list[str], list[str]]:
-    """Split STATUS.md into (preamble_lines, handoff_blocks, postamble_lines)."""
-    preamble, blocks, _, postamble = _parse_status_with_gaps(text)
-    return preamble, blocks, postamble
+_HERE = str(Path(__file__).resolve().parent)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+try:
+    import handoff_lib as hl
+    from handoff_lib import parse_status  # noqa: F401
+except ImportError:
+    print("错误：未找到 handoff_lib.py，请把 handoff_lib.py 一起复制到同一目录。", file=sys.stderr)
+    raise SystemExit(2)
 
 
 def upsert_quote_ref(lines: list[str], marker: str, default_prefix: str, ref_rel: str) -> list[str]:
@@ -221,12 +75,12 @@ def append_or_create_archive(
     arch_path.parent.mkdir(parents=True, exist_ok=True)
     chunk = body.strip("\r\n").rstrip() + "\n"
     if arch_path.is_file() and arch_path.stat().st_size > 0:
-        existing_raw, arch_eol = read_utf8_and_eol(arch_path)
+        existing_raw, arch_eol = hl.read_utf8_and_eol(arch_path)
         existing = existing_raw.rstrip()
-        write_with_eol(arch_path, existing + "\n\n" + chunk, arch_eol)
+        hl.write_with_eol(arch_path, existing + "\n\n" + chunk, arch_eol)
     else:
         header = f"# {header_title}\n\n> {header_note}\n\n"
-        write_with_eol(arch_path, header + chunk, default_eol)
+        hl.write_with_eol(arch_path, header + chunk, default_eol)
 
 
 def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Optional[str]:
@@ -236,17 +90,18 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
         return None
 
     raw_bytes = status_path.read_bytes()
-    status_eol = detect_eol(raw_bytes)
+    status_eol = hl.detect_eol(raw_bytes)
     raw = raw_bytes.decode("utf-8-sig")
     before_bytes = len(raw_bytes)
-    preamble, blocks, gaps, postamble = _parse_status_with_gaps(raw)
+    sdoc = hl.parse_status_document(raw)
+    preamble, blocks, gaps, postamble = sdoc.preamble, sdoc.blocks, sdoc.gaps, sdoc.postamble
     total = len(blocks)
     if total <= keep:
         print(f"STATUS.md：共 {total} 段交接（≤ {keep}），无需归档（{before_bytes}B）。")
         return status_eol
 
-    d_first = latest_date(blocks[0].splitlines()[0], today) or latest_date(blocks[0], today)
-    d_last = latest_date(blocks[-1].splitlines()[0], today) or latest_date(blocks[-1], today)
+    d_first = hl.block_latest_date(blocks[0], today)
+    d_last = hl.block_latest_date(blocks[-1], today)
     if d_first and d_last and d_first > d_last:
         kept_indices = list(range(keep))
         arch_indices = list(range(keep, total))
@@ -275,7 +130,7 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
     arch_dates = [
         d
         for b in to_archive
-        for d in [latest_date(b.splitlines()[0], today) or latest_date(b, today)]
+        for d in [hl.block_latest_date(b, today)]
         if d is not None
     ]
     arch_date_str = max(arch_dates).isoformat() if arch_dates else today.isoformat()
@@ -289,7 +144,7 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
         ref_rel=rel_arch,
     )
     parts = ["\n".join(new_preamble).rstrip(), "\n\n".join(kept_chunks)]
-    post_str = _trim_blank_lines(postamble) if postamble else ""
+    post_str = hl.trim_blank_lines(postamble) if postamble else ""
     if post_str:
         parts.append(post_str)
     new_status_lf = "\n\n".join(p for p in parts if p) + "\n"
@@ -310,7 +165,7 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
         body="\n\n".join(arch_chunks),
         default_eol=status_eol,
     )
-    write_with_eol(status_path, new_status_lf, status_eol)
+    hl.write_with_eol(status_path, new_status_lf, status_eol)
     warn_tail = "（注意：仍 >40KB，可调小 --keep）" if after_bytes > 40_000 else ""
     print(
         f"STATUS.md：已归档 {len(to_archive)} 段 → {rel_arch}，保留 {len(kept_indices)} 段；"
@@ -327,64 +182,21 @@ def archive_agents_sec3(
         return
 
     raw_bytes = agents_path.read_bytes()
-    agents_eol = detect_eol(raw_bytes)
+    agents_eol = hl.detect_eol(raw_bytes)
     raw = raw_bytes.decode("utf-8-sig")
     before_bytes = len(raw_bytes)
-    lines = raw.splitlines()
-    unfenced = unfenced_indices(lines)
 
-    sec3_start: Optional[int] = None
-    sec3_end = len(lines)
-    for i in sorted(unfenced):
-        ln = lines[i]
-        if ln.startswith("## "):
-            if sec3_start is None:
-                if re.match(r"^## 3(?:\.(?!\d)|\s|$)", ln) or ln[3:].strip() in {"现在在哪", "Where We Are Now"}:
-                    sec3_start = i
-            else:
-                sec3_end = i
-                break
-
-    if sec3_start is None:
+    s3 = hl.extract_sec3_info(raw, today)
+    if not s3.exists:
         return
 
-    sec_head = lines[sec3_start]
-    body_lines = lines[sec3_start + 1 : sec3_end]
-
-    # Parse §3 body into blocks: quote/other lines, archivable bullet entries, trailer entries (阻塞 / →)
-    lead_lines: list[str] = []
-    entries: list[tuple[str, list[str]]] = []  # kind ('archivable' | 'trailer'), lines
-    cur_kind: Optional[str] = None
-    cur_buf: list[str] = []
-
-    def flush() -> None:
-        nonlocal cur_kind, cur_buf
-        if cur_kind is not None and cur_buf:
-            entries.append((cur_kind, cur_buf))
-        cur_kind, cur_buf = None, []
-
-    for ln in body_lines:
-        if re.match(r"^[-*]\s+", ln):
-            flush()
-            if re.match(r"^[-*]\s+`?→", ln) or re.match(r"^[-*]\s+\**(?:阻塞|Blockers?)\**[:：]?", ln, re.I):
-                cur_kind = "trailer"
-            else:
-                cur_kind = "archivable"
-            cur_buf = [ln]
-        elif cur_kind is not None:
-            if not ln.strip() or re.match(r"^\s+", ln):
-                cur_buf.append(ln)
-            else:
-                flush()
-                lead_lines.append(ln)
-        else:
-            lead_lines.append(ln)
-    flush()
-
+    lines = raw.splitlines()
+    entries = s3.entries
     archivable = [(idx, blk) for idx, (kind, blk) in enumerate(entries) if kind == "archivable"]
     trailer_bullets = sum(
-        1 for kind, blk in entries
-        if kind == "trailer" and blk and re.match(r"^[-*]\s+(?!`?→)", blk[0])
+        1
+        for kind, blk in entries
+        if kind == "trailer" and blk and re.match(r"^[-*+]\s+(?!`?→)", blk[0])
     )
     snap_budget = max(1, agents_keep - trailer_bullets)
     if len(archivable) <= snap_budget:
@@ -395,21 +207,23 @@ def archive_agents_sec3(
             )
         return
 
-    # Decide chronological vs reverse-chronological order among archivable entries
-    first_d = latest_date("\n".join(archivable[0][1]), today)
-    last_d = latest_date("\n".join(archivable[-1][1]), today)
+    first_d = hl.latest_date("\n".join(archivable[0][1]), today)
+    last_d = hl.latest_date("\n".join(archivable[-1][1]), today)
     reverse_chrono = bool(first_d and last_d and first_d > last_d)
 
     scored = []
     for pos, (entry_idx, blk) in enumerate(archivable):
-        d = latest_date("\n".join(blk), today)
+        d = hl.latest_date("\n".join(blk), today)
         tie = -pos if reverse_chrono else pos
         scored.append(((d or date.min, tie), entry_idx))
     scored.sort(key=lambda x: x[0], reverse=True)
     keep_indices = {entry_idx for _, entry_idx in scored[:snap_budget]}
 
-    to_archive_blocks = ["\n".join(blk).rstrip() for idx, (kind, blk) in enumerate(entries)
-                         if kind == "archivable" and idx not in keep_indices]
+    to_archive_blocks = [
+        "\n".join(blk).rstrip()
+        for idx, (kind, blk) in enumerate(entries)
+        if kind == "archivable" and idx not in keep_indices
+    ]
     kept_entry_lines: list[str] = []
     for idx, (kind, blk) in enumerate(entries):
         if kind == "trailer" or idx in keep_indices:
@@ -417,12 +231,12 @@ def archive_agents_sec3(
                 blk = blk[:-1]
             kept_entry_lines.extend(blk)
 
-    arch_dates = [d for b in to_archive_blocks for d in [latest_date(b, today)] if d is not None]
+    arch_dates = [d for b in to_archive_blocks for d in [hl.latest_date(b, today)] if d is not None]
     arch_date_str = max(arch_dates).isoformat() if arch_dates else "历史"
     rel_arch = f"文档/AGENTS_归档_至{arch_date_str}.md"
     arch_path = root / "文档" / f"AGENTS_归档_至{arch_date_str}.md"
 
-    clean_lead = [ln for ln in lead_lines if ln.strip()]
+    clean_lead = [ln for ln in s3.lead_lines if ln.strip()]
     updated_lead = upsert_quote_ref(
         clean_lead,
         marker="AGENTS_归档_",
@@ -431,8 +245,8 @@ def archive_agents_sec3(
     )
     updated_lead = [ln for ln in updated_lead if ln.strip()]
 
-    new_sec3_lines = [sec_head] + updated_lead + kept_entry_lines + [""]
-    new_lines = lines[:sec3_start] + new_sec3_lines + lines[sec3_end:]
+    new_sec3_lines = [s3.heading_line] + updated_lead + kept_entry_lines + [""]
+    new_lines = lines[: s3.start_line] + new_sec3_lines + lines[s3.end_line :]
     new_agents_lf = "\n".join(new_lines).rstrip() + "\n"
     new_agents_final = new_agents_lf.replace("\n", "\r\n") if agents_eol == "\r\n" else new_agents_lf
     after_bytes = len(new_agents_final.encode("utf-8"))
@@ -452,7 +266,7 @@ def archive_agents_sec3(
         body="\n\n".join(to_archive_blocks),
         default_eol=arch_default_eol,
     )
-    write_with_eol(agents_path, new_agents_lf, agents_eol)
+    hl.write_with_eol(agents_path, new_agents_lf, agents_eol)
     print(
         f"AGENTS.md §3：已归档 {len(to_archive_blocks)} 条 → {rel_arch}，"
         f"保留 {len(keep_indices)} 条快照（含阻塞共 {len(keep_indices) + trailer_bullets} 条）；体积 {before_bytes}B → {after_bytes}B。"

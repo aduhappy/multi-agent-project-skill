@@ -3,6 +3,7 @@
 """Smoke and regression tests for check_handoff.py, archive_status.py, and skill assets."""
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import subprocess
@@ -17,6 +18,58 @@ ASSETS_DIR = REPO / "assets"
 CHECKER = ASSETS_DIR / "check_handoff.py"
 ARCHIVER = ASSETS_DIR / "archive_status.py"
 TODAY = "2026-09-15"
+
+_ORIG_SUBPROCESS_RUN = subprocess.run
+_DUMP_DIR: Path | None = None
+_DUMP_COUNTERS: dict[str, int] = {}
+
+
+def _normalize_temp_paths(text: str, cmd: list[str]) -> str:
+    tmp_root = Path(tempfile.gettempdir()).resolve()
+    out = text
+    for tok in cmd:
+        try:
+            p = Path(tok).resolve()
+        except OSError:
+            continue
+        if p == tmp_root or tmp_root in p.parents:
+            # Find the immediate child under system temp dir (e.g. .../Temp/tmpXYZ)
+            cur = p
+            while cur.parent != tmp_root and cur != cur.parent:
+                cur = cur.parent
+            for cand in sorted({str(cur), tok.split("does_not_exist")[0].rstrip("/\\")}, key=len, reverse=True):
+                if cand and len(cand) > 3:
+                    out = out.replace(cand, "<TMPDIR>")
+    return out
+
+
+def _tracing_subprocess_run(cmd, *args, **kwargs):
+    res = _ORIG_SUBPROCESS_RUN(cmd, *args, **kwargs)
+    if _DUMP_DIR is not None and isinstance(cmd, (list, tuple)):
+        str_cmd = [str(x) for x in cmd]
+        is_checker = str(CHECKER) in str_cmd
+        is_archiver = str(ARCHIVER) in str_cmd
+        if (is_checker or is_archiver) and not any(f in str_cmd for f in ("--help", "--version")):
+            caller = "main_inline"
+            frame = sys._getframe(1)
+            while frame is not None:
+                fname = frame.f_code.co_name
+                if fname.startswith("test_"):
+                    caller = fname
+                    break
+                frame = frame.f_back
+            seq = _DUMP_COUNTERS.get(caller, 0) + 1
+            _DUMP_COUNTERS[caller] = seq
+            kind = "check" if is_checker else "archive"
+            _DUMP_DIR.mkdir(parents=True, exist_ok=True)
+            payload = f"rc={res.returncode}\n--- stdout ---\n{res.stdout or ''}"
+            if res.stderr:
+                payload += f"\n--- stderr ---\n{_normalize_temp_paths(res.stderr, str_cmd)}"
+            (_DUMP_DIR / f"{caller}__{seq:03d}__{kind}.txt").write_bytes(payload.encode("utf-8"))
+    return res
+
+
+subprocess.run = _tracing_subprocess_run
 
 if str(ASSETS_DIR) not in sys.path:
     sys.path.insert(0, str(ASSETS_DIR))
@@ -1761,7 +1814,14 @@ def test_041_r2_adv3_changelog_notes_bare_jiaohui() -> None:
     check(len(checker_mod.handoff_blocks(with_tid)) == 1, "'## T13c 交回（2026-09-15）' must still count as handoff")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    global _DUMP_DIR
+    parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
+    parser.add_argument("--dump-dir", help="Optional directory to dump every temp-project checker/archiver output")
+    args = parser.parse_args(argv)
+    _DUMP_COUNTERS.clear()
+    _DUMP_DIR = Path(args.dump_dir).expanduser().resolve() if args.dump_dir else None
+
     test_asset_sizes()
 
     test_041_a1_board_template()
