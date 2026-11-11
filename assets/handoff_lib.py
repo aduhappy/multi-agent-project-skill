@@ -788,6 +788,47 @@ def extract_card_id(stem: str) -> str:
     return m.group(1) if m else stem
 
 
+def collect_active_card_ids(root: Path, cfg: HandoffConfig) -> list[str]:
+    """Return card IDs of active task cards (parsed state present and not in ✅/🗄️) under cards_dir."""
+    cards_dir = root / cfg.cards_dir
+    if not cards_dir.is_dir():
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for fp in sorted(cards_dir.glob("*.md")):
+        if "复核" in fp.stem:
+            continue
+        st = parse_card_state(read_utf8(fp))
+        if st is None or st in CLOSED:
+            continue
+        cid = extract_card_id(fp.stem)
+        if cid and cid.upper() not in seen:
+            seen.add(cid.upper())
+            out.append(cid)
+    return out
+
+
+def block_mentions_active_card(seg: str, active_cids: list[str]) -> bool:
+    """True when a handoff segment's heading mentions any active card ID (including T12a/b slash groups)."""
+    if not active_cids:
+        return False
+    seg_doc = parse_markdown(seg)
+    if not seg_doc.blocks or seg_doc.blocks[0].kind != "heading":
+        head_text = seg.splitlines()[0] if seg.splitlines() else ""
+    else:
+        head_text = seg_doc.blocks[0].visible_text(include_code=True)
+    active_upper = {c.upper() for c in active_cids}
+    for m in SLASH_CARDS_RE.finditer(head_text):
+        base = m.group(1)
+        for ch in m.group(2).split("/"):
+            if f"{base}{ch}".upper() in active_upper:
+                return True
+    for cid in active_cids:
+        if re.search(rf"(?<![A-Za-z0-9-]){re.escape(cid)}(?![A-Za-z0-9-])", head_text, re.I):
+            return True
+    return False
+
+
 def extract_progress_blocks(doc: ParsedDoc) -> list[Block]:
     """Return content blocks inside the '## 进度回写' section of a task card."""
     start_idx: Optional[int] = None

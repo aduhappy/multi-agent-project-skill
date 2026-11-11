@@ -105,11 +105,26 @@ def archive_status_file(
     d_first = hl.block_latest_date(blocks[0], today)
     d_last = hl.block_latest_date(blocks[-1], today)
     if d_first and d_last and d_first > d_last:
-        kept_indices = list(range(keep))
-        arch_indices = list(range(keep, total))
+        quota_kept = set(range(keep))
+        cand_arch = list(range(keep, total))
     else:
-        arch_indices = list(range(total - keep))
-        kept_indices = list(range(total - keep, total))
+        cand_arch = list(range(total - keep))
+        quota_kept = set(range(total - keep, total))
+
+    active_cids = hl.collect_active_card_ids(root, cfg)
+    pinned_arch = {
+        idx for idx in cand_arch if hl.block_mentions_active_card(blocks[idx], active_cids)
+    }
+    extra_kept = len(pinned_arch)
+    arch_indices = [idx for idx in cand_arch if idx not in pinned_arch]
+    kept_indices = sorted(quota_kept | pinned_arch)
+
+    if not arch_indices:
+        prefix = "[DRY-RUN] " if dry_run else ""
+        print(
+            f"{prefix}STATUS.md：共 {total} 段交接，保留 {len(kept_indices)} 段（因此多留了 {extra_kept} 段），无需归档（{before_bytes}B）。"
+        )
+        return status_eol
 
     to_archive = [blocks[i] for i in arch_indices]
     arch_chunks: list[str] = []
@@ -153,9 +168,10 @@ def archive_status_file(
     new_status_final = new_status_lf.replace("\n", "\r\n") if status_eol == "\r\n" else new_status_lf
     after_bytes = len(new_status_final.encode("utf-8"))
 
+    extra_note = f"（因此多留了 {extra_kept} 段）" if extra_kept else ""
     if dry_run:
         print(
-            f"[DRY-RUN] STATUS.md：将归档 {len(to_archive)} 段 → {rel_arch}，保留 {len(kept_indices)} 段；"
+            f"[DRY-RUN] STATUS.md：将归档 {len(to_archive)} 段 → {rel_arch}，保留 {len(kept_indices)} 段{extra_note}；"
             f"体积 {before_bytes}B → {after_bytes}B。"
         )
         return status_eol
@@ -170,7 +186,7 @@ def archive_status_file(
     hl.write_with_eol(status_path, new_status_lf, status_eol)
     warn_tail = "（注意：仍 >40KB，可调小 --keep）" if after_bytes > 40_000 else ""
     print(
-        f"STATUS.md：已归档 {len(to_archive)} 段 → {rel_arch}，保留 {len(kept_indices)} 段；"
+        f"STATUS.md：已归档 {len(to_archive)} 段 → {rel_arch}，保留 {len(kept_indices)} 段{extra_note}；"
         f"体积 {before_bytes}B → {after_bytes}B{warn_tail}。"
     )
     return status_eol

@@ -1981,6 +1981,45 @@ def test_042_conv4_config() -> None:
         check(arc_bad_rc == 0 and "提示：handoff_config.json 解析失败" in arc_bad_out, f"archiver on broken JSON must warn and fallback:\n{arc_bad_out}")
 
 
+def test_042_conv5_archive_keep_active_cards() -> None:
+    """0.4.2 Conv5: archive_status keeps older handoff blocks mentioning active cards without consuming --keep N slots."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        segs = [
+            f"## Handoff（2026-09-{d:02d}，{'T2 样张交回' if d in (2, 4) else f'T1 第{d}轮'}）\n"
+            f"- **谁做的**：执行方\n- **改了什么**：第 {d} 轮内容 MARK_{d:02d}。\n- **怎么验证的**：通过。\n- **没做什么**：无。\n- **不确定处**：无。"
+            for d in range(1, 15)
+        ]
+        orig_status = "# STATUS\n\n" + "\n\n".join(segs) + "\n"
+        write(line / "STATUS.md", orig_status)
+
+        # Case 1: T1 ✅ closed, T2 🔵 active -> --keep 10 keeps 10 newest (05..14) + 2 active T2 blocks (02, 04) = 12 kept, 2 archived (01, 03)
+        cards_dir = line / "文档" / "任务卡"
+        write(cards_dir / "T1_已收口.md", "# T1\n\n## 进度回写\n- 状态：✅已收口\n")
+        write(cards_dir / "T2_图集.md", "# T2\n\n## 进度回写\n- 状态：🔵待收口\n")
+
+        arc_rc, arc_out, _ = run_archiver(line, "--keep", "10")
+        check(
+            arc_rc == 0 and "已归档 2 段" in arc_out and "保留 12 段" in arc_out and "多留了 2 段" in arc_out,
+            f"active T2 blocks must stay without eating keep=10 quota:\n{arc_out}",
+        )
+        new_st = (line / "STATUS.md").read_text(encoding="utf-8")
+        arch_text = (line / "文档" / "STATUS_归档_至2026-09-03.md").read_text(encoding="utf-8")
+        for d in (2, 4, *range(5, 15)):
+            check(f"MARK_{d:02d}" in new_st and f"MARK_{d:02d}" not in arch_text, f"day {d} must remain in STATUS.md")
+        for d in (1, 3):
+            check(f"MARK_{d:02d}" in arch_text and f"MARK_{d:02d}" not in new_st, f"closed day {d} must move to archive")
+
+        # Case 2: No task cards directory -> behaves identically to 0.4.1 (archives 4 oldest, keeps 10)
+        line2 = build(Path(temp) / "nocards")
+        write(line2 / "STATUS.md", orig_status)
+        arc2_rc, arc2_out, _ = run_archiver(line2, "--keep", "10")
+        check(
+            arc2_rc == 0 and "已归档 4 段" in arc2_out and "保留 10 段" in arc2_out and "多留" not in arc2_out,
+            f"missing cards dir must behave identically to 0.4.1:\n{arc2_out}",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2155,6 +2194,7 @@ def main(argv: list[str] | None = None) -> int:
 
     test_042_conv3_role()
     test_042_conv4_config()
+    test_042_conv5_archive_keep_active_cards()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")
