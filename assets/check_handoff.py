@@ -25,7 +25,7 @@
   H009 TL;DR 日期与 §3 不矛盾（任一方没日期则跳过）
   A001–A015 只提示不阻断：
        A001 决策登记表存在
-       A002 多脚本同名口径常量集合一致（自动排除 *_COLORS 等显示/配色常量，支持 # noqa: A002 豁免）
+       A002 多脚本同名口径常量集合一致（只看列表、集合、元组字面量，识别字符串与数字成员；自动排除 *_COLORS 等显示/配色常量，支持 # noqa: A002 豁免）
        A003 入口与任务卡索引体积（AGENTS ≤25KB、STATUS ≤40KB、任务卡索引 ≤15KB）
        A004 §4 看板至少勾了一项（模板占位行不算）
        A005 在用任务卡同时带执行方和独立复核方派发提示词（跳过 ✅/🗄️）
@@ -578,6 +578,42 @@ def line_checks(root: Path, cfg: hl.HandoffConfig, days: int, today: date) -> No
     advisories(root, cfg, agents, agents_doc, s3, board_items, status, blocks, today)
 
 
+def check_script_constants_a002(root: Path) -> tuple[bool, str]:
+    """检查 scripts/*.py 多脚本同名常量集合是否一致：只看列表、集合、元组字面量（含单层 {} 字面量），同时识别字符串与数字成员。"""
+    const_re = re.compile(
+        r"^([A-Z][A-Z0-9_]{2,})\s*=\s*(\{[^{}]*\}|\[[^\[\]]*\]|\([^()]*,[^()]*\))([^\n]*)$",
+        re.M,
+    )
+    seen: dict[str, dict[tuple[str, ...], list[str]]] = {}
+    scripts = root / "scripts"
+    for fp in sorted(scripts.rglob("*.py")) if scripts.is_dir() else []:
+        script_text = hl.read_utf8(fp)
+        for m in const_re.finditer(script_text):
+            cname, cbody = m.group(1), m.group(2)
+            full_stmt = m.group(0)
+            if re.search(r"#\s*(?:noqa(?:\s*:\s*A002)?|a002\s*:\s*ignore|check_handoff\s*:\s*ignore)\b", full_stmt, re.I):
+                continue
+            if DISPLAY_CONST_RE.search(cname):
+                continue
+            quoted = re.findall(r"['\"]([^'\"]+)['\"]", cbody)
+            unquoted = re.sub(r"'[^']*'|\"[^\"]*\"", " ", cbody)
+            unquoted = re.sub(r"#[^\n]*", " ", unquoted)
+            nums = re.findall(r"(?<![A-Za-z0-9_.])-?\d+(?:\.\d+)?(?![A-Za-z0-9_.])", unquoted)
+            members = tuple(sorted([*quoted, *nums]))
+            if not members:
+                continue
+            if all(HEX_COLOR_RE.match(x) for x in members):
+                continue
+            if cbody.lstrip().startswith("{") and ":" in cbody:
+                dict_vals = re.findall(r":\s*['\"]([^'\"]+)['\"]", cbody)
+                if dict_vals and len(dict_vals) == cbody.count(":") and all(HEX_COLOR_RE.match(v) for v in dict_vals):
+                    continue
+            rel_name = fp.relative_to(scripts).as_posix()
+            seen.setdefault(cname, {}).setdefault(members, []).append(rel_name)
+    drift_consts = [f"{name}: {list(v.values())}" for name, v in seen.items() if len(v) > 1]
+    return not drift_consts, "; ".join(drift_consts)
+
+
 def advisories(
     root: Path,
     cfg: hl.HandoffConfig,
@@ -592,31 +628,8 @@ def advisories(
     registry = "决策登记表" in agents or "决策登记表" in status or (root / cfg.docs_dir / "决策登记表.md").is_file()
     add("A001", "决策登记表存在", registry, "" if registry else "具约束力的决策应收口到一张可 grep 的表", True)
 
-    const_re = re.compile(r"^([A-Z][A-Z0-9_]{2,})\s*=\s*(\{[^{}]*\}|\[[^\[\]]*\])([^\n]*)$", re.M)
-    seen: dict[str, dict[tuple[str, ...], list[str]]] = {}
-    scripts = root / "scripts"
-    for fp in sorted(scripts.rglob("*.py")) if scripts.is_dir() else []:
-        script_text = hl.read_utf8(fp)
-        for m in const_re.finditer(script_text):
-            cname, cbody = m.group(1), m.group(2)
-            full_stmt = m.group(0)
-            if re.search(r"#\s*(?:noqa(?:\s*:\s*A002)?|a002\s*:\s*ignore|check_handoff\s*:\s*ignore)\b", full_stmt, re.I):
-                continue
-            if DISPLAY_CONST_RE.search(cname):
-                continue
-            members = tuple(sorted(re.findall(r"['\"]([^'\"]+)['\"]", cbody)))
-            if not members:
-                continue
-            if all(HEX_COLOR_RE.match(x) for x in members):
-                continue
-            if cbody.lstrip().startswith("{") and ":" in cbody:
-                dict_vals = re.findall(r":\s*['\"]([^'\"]+)['\"]", cbody)
-                if dict_vals and len(dict_vals) == cbody.count(":") and all(HEX_COLOR_RE.match(v) for v in dict_vals):
-                    continue
-            rel_name = fp.relative_to(scripts).as_posix()
-            seen.setdefault(cname, {}).setdefault(members, []).append(rel_name)
-    drift_consts = [f"{name}: {list(v.values())}" for name, v in seen.items() if len(v) > 1]
-    add("A002", "多脚本同名常量集合一致", not drift_consts, "; ".join(drift_consts), True)
+    a002_ok, a002_detail = check_script_constants_a002(root)
+    add("A002", "多脚本同名常量集合一致", a002_ok, a002_detail, True)
 
     index = hl.read_utf8(root / cfg.index_file)
     index_disp = Path(cfg.index_file).name

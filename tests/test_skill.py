@@ -2258,6 +2258,28 @@ def test_042_v8_multiple_decision_tables() -> None:
         )
 
 
+def test_042_v9_a002_numeric_and_tuples() -> None:
+    """0.4.2 V9: A002 detects numeric collections & tuples, and docstring states list/set/tuple literal scope."""
+    doc_txt = (checker_mod.__doc__ or "") + "\n" + (getattr(checker_mod, "check_script_constants_a002", None).__doc__ or "")
+    check(
+        "只看列表、集合、元组字面量" in doc_txt,
+        f"A002 docstring must explicitly state '只看列表、集合、元组字面量', got:\n{doc_txt}",
+    )
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(line / "scripts" / "s1.py", "YEARS = [2019, 2020]\nZONES = ('I', 'II')\n")
+        write(line / "scripts" / "s2.py", "YEARS = [2019, 2020, 2021]\nZONES = ('I', 'II', 'III')\n")
+        rc, out = run(line)
+        check(
+            rc == 0 and "[A002] ⚠️" in out and "YEARS:" in out and "ZONES:" in out,
+            f"V9 A002 must detect drift in numeric list YEARS and tuple ZONES:\n{out}",
+        )
+        # Matching numeric set/tuple/list with identical elements must PASS A002
+        write(line / "scripts" / "s2.py", "YEARS = (2020, 2019)\nZONES = ['II', 'I']\n")
+        rc2, out2 = run(line)
+        check(rc2 == 0 and "[A002] ✅" in out2, f"identical numeric/tuple sets must pass A002:\n{out2}")
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2441,6 +2463,7 @@ def main(argv: list[str] | None = None) -> int:
     test_042_v6_card_id_case_and_collision()
     test_042_v7_misplaced_review_in_cards_dir()
     test_042_v8_multiple_decision_tables()
+    test_042_v9_a002_numeric_and_tuples()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")
