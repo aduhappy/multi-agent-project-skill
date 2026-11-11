@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
 from dataclasses import dataclass
@@ -136,6 +137,97 @@ def write_with_eol(path: Path, text: str, eol: str) -> None:
     norm = text.replace("\r\n", "\n").replace("\r", "\n")
     out = norm.replace("\n", "\r\n") if eol == "\r\n" else norm
     path.write_bytes(out.encode("utf-8"))
+
+
+# =====================================================================
+# Configurable Directory Layout (handoff_config.json)
+# =====================================================================
+
+CONFIG_FILENAME = "handoff_config.json"
+DEFAULT_DOCS_DIR = "文档"
+DEFAULT_CARDS_DIR = "文档/任务卡"
+DEFAULT_INDEX_FILE = "文档/任务卡_README.md"
+DEFAULT_REVIEW_DIRS: tuple[str, ...] = ("文档", "reports")
+ALLOWED_CONFIG_KEYS = frozenset({"docs_dir", "cards_dir", "index_file", "review_dirs"})
+
+
+@dataclass(frozen=True)
+class HandoffConfig:
+    docs_dir: str = DEFAULT_DOCS_DIR
+    cards_dir: str = DEFAULT_CARDS_DIR
+    index_file: str = DEFAULT_INDEX_FILE
+    review_dirs: tuple[str, ...] = DEFAULT_REVIEW_DIRS
+    warnings: tuple[str, ...] = ()
+
+
+def _clean_rel_path(val: object) -> Optional[str]:
+    if not isinstance(val, str):
+        return None
+    s = val.strip().replace("\\", "/").strip("/")
+    return s if s else None
+
+
+def load_handoff_config(root: Path) -> HandoffConfig:
+    """Load optional <root>/handoff_config.json. Never raises; falls back to defaults with warnings."""
+    cfg_path = root / CONFIG_FILENAME
+    if not cfg_path.is_file():
+        return HandoffConfig()
+
+    try:
+        raw = cfg_path.read_bytes().decode("utf-8-sig")
+        data = json.loads(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return HandoffConfig(warnings=(f"{CONFIG_FILENAME} 解析失败（{exc}），已使用默认目录配置。",))
+
+    if not isinstance(data, dict):
+        return HandoffConfig(warnings=(f"{CONFIG_FILENAME} 顶层须为 JSON 对象，已使用默认目录配置。",))
+
+    warns: list[str] = []
+    unknown = sorted(set(data.keys()) - ALLOWED_CONFIG_KEYS)
+    if unknown:
+        warns.append(
+            f"{CONFIG_FILENAME} 含未识别的键 {', '.join(unknown)}（仅支持 docs_dir、cards_dir、index_file、review_dirs），已忽略并用默认值。"
+        )
+
+    docs_dir = DEFAULT_DOCS_DIR
+    if "docs_dir" in data:
+        cleaned = _clean_rel_path(data["docs_dir"])
+        if cleaned is not None:
+            docs_dir = cleaned
+        else:
+            warns.append(f"{CONFIG_FILENAME} 键 docs_dir 值无效，已使用默认值 {DEFAULT_DOCS_DIR!r}。")
+
+    cards_dir = DEFAULT_CARDS_DIR
+    if "cards_dir" in data:
+        cleaned = _clean_rel_path(data["cards_dir"])
+        if cleaned is not None:
+            cards_dir = cleaned
+        else:
+            warns.append(f"{CONFIG_FILENAME} 键 cards_dir 值无效，已使用默认值 {DEFAULT_CARDS_DIR!r}。")
+
+    index_file = DEFAULT_INDEX_FILE
+    if "index_file" in data:
+        cleaned = _clean_rel_path(data["index_file"])
+        if cleaned is not None:
+            index_file = cleaned
+        else:
+            warns.append(f"{CONFIG_FILENAME} 键 index_file 值无效，已使用默认值 {DEFAULT_INDEX_FILE!r}。")
+
+    review_dirs = DEFAULT_REVIEW_DIRS
+    if "review_dirs" in data:
+        rv = data["review_dirs"]
+        if isinstance(rv, list) and all(isinstance(x, str) and x.strip() for x in rv):
+            review_dirs = tuple(x.strip().replace("\\", "/").strip("/") for x in rv)
+        else:
+            warns.append(f"{CONFIG_FILENAME} 键 review_dirs 须为非空字符串列表，已使用默认值 {list(DEFAULT_REVIEW_DIRS)!r}。")
+
+    return HandoffConfig(
+        docs_dir=docs_dir,
+        cards_dir=cards_dir,
+        index_file=index_file,
+        review_dirs=review_dirs,
+        warnings=tuple(warns),
+    )
 
 
 # =====================================================================

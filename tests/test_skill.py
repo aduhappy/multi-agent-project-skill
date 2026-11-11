@@ -1911,6 +1911,76 @@ def test_042_conv3_role() -> None:
         check(rc_bad_st == 1 and "[A011] ❌" in out_bad_st and "缺节" in out_bad_st, f"missing handoff sections must fail in reviewer role:\n{out_bad_st}")
 
 
+def test_042_conv4_config() -> None:
+    """0.4.2 Conv4: handoff_config.json configures docs_dir/cards_dir/index_file/review_dirs; bad JSON/keys warn & fallback without crashing."""
+    import json
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(
+            line / "STATUS.md",
+            "# STATUS\n\n"
+            + "\n\n".join(
+                f"## Handoff（2026-09-{d:02d}，T{d}）\n"
+                f"- **谁做的**：主控\n- **改了什么**：第 {d} 轮。\n- **怎么验证的**：通过。\n- **没做什么**：无。\n- **不确定处**：无。"
+                for d in range(4, 16)
+            )
+            + "\n",
+        )
+        write(
+            line / "文档" / "任务卡_README.md",
+            "| 卡 | 做什么 | 状态 | 文件 |\n|---|---|---|---|\n| T1 | 初稿 | ✅已收口 | `任务卡/T1_初稿.md` |\n| T2 | 方法 | ⬜可派 | `任务卡/T2_方法.md` |\n",
+        )
+        write(line / "文档" / "任务卡" / "T1_初稿.md", "# T1\n\n## 进度回写\n- 状态：✅已收口\n")
+        write(
+            line / "文档" / "任务卡" / "T2_方法.md",
+            "# T2\n\n## 进度回写\n- 状态：⬜可派\n\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n",
+        )
+        write(line / "文档" / "T2_复核_SWE2_2026-09-15.md", "# T2 复核\n\n## 会出错\n无\n\n## 建议\n无\n\nPASS\n")
+
+        rc_before, out_before = run(line)
+        check(rc_before == 0, f"fixture before rename must pass:\n{out_before}")
+
+        # Rename 文档 -> docs and write handoff_config.json -> byte-identical check_handoff output
+        (line / "文档").rename(line / "docs")
+        (line / "handoff_config.json").write_text(
+            json.dumps(
+                {
+                    "docs_dir": "docs",
+                    "cards_dir": "docs/任务卡",
+                    "index_file": "docs/任务卡_README.md",
+                    "review_dirs": ["docs", "reports"],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        rc_after, out_after = run(line)
+        check(
+            rc_after == rc_before and out_after == out_before,
+            f"check_handoff output after renaming 文档 -> docs with handoff_config.json must be byte-identical!\nBEFORE:\n{out_before}\nAFTER:\n{out_after}",
+        )
+
+        # archive_status writes archive files into configured docs_dir ("docs/")
+        arc_rc, arc_out, _ = run_archiver(line, "--keep", "10")
+        check(arc_rc == 0 and "docs/STATUS_归档_至2026-09-05.md" in arc_out, f"archiver must write to docs/:\n{arc_out}")
+        check((line / "docs" / "STATUS_归档_至2026-09-05.md").is_file(), "archive file must be created inside docs/")
+        check(not (line / "文档").exists(), "archiver must not recreate hardcoded 文档/")
+
+        # Unknown key in handoff_config.json -> prints warning and uses default for missing keys, never crashes
+        (line / "docs").rename(line / "文档")
+        (line / "handoff_config.json").write_text('{"typo_key": "abc"}', encoding="utf-8")
+        rc_unk, out_unk = run(line)
+        check(rc_unk == 0 and "提示：handoff_config.json" in out_unk and "typo_key" in out_unk, f"unknown key must warn and fallback:\n{out_unk}")
+
+        # Broken JSON -> prints warning and uses defaults, never crashes
+        (line / "handoff_config.json").write_text("{broken json!!!", encoding="utf-8")
+        rc_bad, out_bad = run(line)
+        check(rc_bad == 0 and "提示：handoff_config.json 解析失败" in out_bad, f"broken JSON must warn and fallback:\n{out_bad}")
+        arc_bad_rc, arc_bad_out, _ = run_archiver(line, "--dry-run")
+        check(arc_bad_rc == 0 and "提示：handoff_config.json 解析失败" in arc_bad_out, f"archiver on broken JSON must warn and fallback:\n{arc_bad_out}")
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2084,6 +2154,7 @@ def main(argv: list[str] | None = None) -> int:
     test_r1_a003_distinguishes_status_vs_agents()
 
     test_042_conv3_role()
+    test_042_conv4_config()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")

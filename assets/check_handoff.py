@@ -78,7 +78,7 @@ DISPLAY_CONST_RE = re.compile(
     r"(?:^|_)(?:COLORS?|PALETTES?|CMAPS?|COLORMAPS?|STYLES?|FONTS?|MARKERS?|HATCH(?:ES)?|LINESTYLES?|ALPHAS?|SIZES?|WIDTHS?)$"
 )
 HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{3,8}$")
-SKIP_REVIEW_DIRS = {"任务卡", "决策记录", "原始资料", "_作废", "归档"}
+SKIP_REVIEW_DIRS = {"决策记录", "原始资料", "_作废", "归档"}
 
 findings: list[tuple[str, str, bool, str, bool]] = []  # code, name, ok, detail, advisory
 
@@ -174,13 +174,20 @@ def check_status_h005(status: str, today: date) -> tuple[bool, str]:
     return False, "；".join(dedup[:4])
 
 
-def collect_review_files(root: Path) -> list[Path]:
+def collect_review_files(root: Path, cfg: hl.HandoffConfig) -> list[Path]:
     found: list[Path] = []
-    for sub in ("文档", "reports"):
+    seen_paths: set[Path] = set()
+    cards_resolved = (root / cfg.cards_dir).resolve()
+    for sub in cfg.review_dirs:
         base = root / sub
         if not base.is_dir():
             continue
         for fp in sorted(base.rglob("*.md")):
+            fp_res = fp.resolve()
+            if fp_res in seen_paths:
+                continue
+            if fp_res.parent == cards_resolved or cards_resolved in fp_res.parents:
+                continue
             rel_parts = fp.relative_to(base).parts[:-1]
             if any(
                 p in SKIP_REVIEW_DIRS or p.startswith("_") or p.endswith("_DEPRECATED")
@@ -190,6 +197,7 @@ def collect_review_files(root: Path) -> list[Path]:
             if fp.stem.endswith("_DEPRECATED"):
                 continue
             if "复核" in fp.stem:
+                seen_paths.add(fp_res)
                 found.append(fp)
     return found
 
@@ -449,7 +457,7 @@ def card_states(cards: list[Path]) -> dict[str, tuple[str, str]]:
     return states
 
 
-def line_checks(root: Path, days: int, today: date) -> None:
+def line_checks(root: Path, cfg: hl.HandoffConfig, days: int, today: date) -> None:
     agents = hl.read_utf8(root / "AGENTS.md")
     status = hl.read_utf8(root / "STATUS.md")
     agents_doc = hl.parse_markdown(agents)
@@ -546,11 +554,12 @@ def line_checks(root: Path, days: int, today: date) -> None:
     h009_rhs = f"§3 {sec3_date}" if sec3_date else (sec3_missing_msg if sec3_is_placeholder else "§3 None")
     add("H009", "TL;DR 日期与 §3 不矛盾", not conflict, f"TL;DR {tldr_date} vs {h009_rhs}")
 
-    advisories(root, agents, agents_doc, s3, board_items, status, blocks, today)
+    advisories(root, cfg, agents, agents_doc, s3, board_items, status, blocks, today)
 
 
 def advisories(
     root: Path,
+    cfg: hl.HandoffConfig,
     agents: str,
     agents_doc: hl.ParsedDoc,
     s3: hl.Sec3Info,
@@ -559,7 +568,7 @@ def advisories(
     blocks: list[str],
     today: date,
 ) -> None:
-    registry = "决策登记表" in agents or "决策登记表" in status or (root / "文档" / "决策登记表.md").is_file()
+    registry = "决策登记表" in agents or "决策登记表" in status or (root / cfg.docs_dir / "决策登记表.md").is_file()
     add("A001", "决策登记表存在", registry, "" if registry else "具约束力的决策应收口到一张可 grep 的表", True)
 
     const_re = re.compile(r"^([A-Z][A-Z0-9_]{2,})\s*=\s*(\{[^{}]*\}|\[[^\[\]]*\])([^\n]*)$", re.M)
@@ -588,7 +597,8 @@ def advisories(
     drift_consts = [f"{name}: {list(v.values())}" for name, v in seen.items() if len(v) > 1]
     add("A002", "多脚本同名常量集合一致", not drift_consts, "; ".join(drift_consts), True)
 
-    index = hl.read_utf8(root / "文档" / "任务卡_README.md")
+    index = hl.read_utf8(root / cfg.index_file)
+    index_disp = Path(cfg.index_file).name
     agents_sz = len(agents.encode("utf-8"))
     status_sz = len(status.encode("utf-8"))
     index_sz = len(index.encode("utf-8"))
@@ -597,7 +607,7 @@ def advisories(
         for n, sz, limit in (
             ("AGENTS.md", agents_sz, 25_000),
             ("STATUS.md", status_sz, 40_000),
-            ("任务卡_README.md", index_sz, 15_000),
+            (index_disp, index_sz, 15_000),
         )
         if sz > limit
     ]
@@ -630,7 +640,7 @@ def advisories(
     a004_detail = f"{checked} 勾 / {unchecked} 未勾" + (f"（忽略 {tpl_box_cnt} 行模板占位）" if tpl_box_cnt else "")
     add("A004", "§4 看板至少勾了一项", a004_ok, a004_detail, True)
 
-    cards_dir = root / "文档" / "任务卡"
+    cards_dir = root / cfg.cards_dir
     cards_dir_exists = cards_dir.is_dir()
     cards = sorted(cards_dir.glob("*.md")) if cards_dir_exists else []
     active_cards: list[tuple[Path, str]] = []
@@ -840,7 +850,7 @@ def advisories(
             )
         add("A011", "STATUS 最近 5 段交接 ≤800 字且四节齐", a011_ok, a011_detail, True)
 
-    review_files = collect_review_files(root)
+    review_files = collect_review_files(root, cfg)
     checked_reviews: list[Path] = []
     skipped_reviews = 0
     bad_reviews: list[str] = []
@@ -883,9 +893,9 @@ def advisories(
     add("A014", "AGENTS.md 无遗留【待填】且“不可混用的维度”已填", a014_ok, a014_detail, True)
 
     if not cards_dir_exists:
-        a015_ok, a015_detail = False, "未找到 文档/任务卡/ 目录，卡类检查（A005—A009）均未执行"
+        a015_ok, a015_detail = False, f"未找到 {cfg.cards_dir}/ 目录，卡类检查（A005—A009）均未执行"
     elif not cards:
-        a015_ok, a015_detail = False, "文档/任务卡/ 下有 0 张任务卡，卡类检查（A005—A009）均未执行"
+        a015_ok, a015_detail = False, f"{cfg.cards_dir}/ 下有 0 张任务卡，卡类检查（A005—A009）均未执行"
     else:
         a015_ok, a015_detail = True, f"{len(cards)} 张任务卡"
     add("A015", "任务卡目录存在且非空", a015_ok, a015_detail, True)
@@ -923,7 +933,7 @@ def index_checks(root: Path) -> None:
     )
 
 
-def role_checks(root: Path, role: str, card_arg: Optional[str], today: date) -> None:
+def role_checks(root: Path, cfg: hl.HandoffConfig, role: str, card_arg: Optional[str], today: date) -> None:
     """Checks for --role executor / reviewer: never reads or checks AGENTS.md."""
     status = hl.read_utf8(root / "STATUS.md")
     h005_ok, h005_detail = check_status_h005(status, today)
@@ -967,7 +977,7 @@ def role_checks(root: Path, role: str, card_arg: Optional[str], today: date) -> 
 
     if card_arg:
         target_id = card_arg.strip()
-        cards_dir = root / "文档" / "任务卡"
+        cards_dir = root / cfg.cards_dir
         cards = sorted(cards_dir.glob("*.md")) if cards_dir.is_dir() else []
         matched = [fp for fp in cards if hl.extract_card_id(fp.stem).upper() == target_id.upper()]
         if not matched:
@@ -1022,6 +1032,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"[H000] ❌ FAIL 项目根不是目录：{root}", file=sys.stderr)
         return 2
     today = datetime.strptime(args.today, "%Y-%m-%d").date() if args.today else date.today()
+    cfg = hl.load_handoff_config(root)
+    for w in cfg.warnings:
+        print(f"提示：{w}")
 
     findings.clear()
     if args.role in ("executor", "reviewer"):
@@ -1029,7 +1042,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(
             f"角色={args.role}（已跳过 AGENTS.md 全部检查项 H001–H004/H006–H009 及主控全局项，仅查 STATUS.md 最近交接段{card_note}）"
         )
-        role_checks(root, args.role, args.card, today)
+        role_checks(root, cfg, args.role, args.card, today)
         print("=" * 60)
         print(f"  收工交接自检 | role={args.role}" + (f" | card={args.card}" if args.card else "") + f" | today={today}")
         print("=" * 60)
@@ -1037,7 +1050,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.scope == "index":
             index_checks(root)
         else:
-            line_checks(root, args.days, today)
+            line_checks(root, cfg, args.days, today)
         print("=" * 60)
         print(f"  收工交接自检 | scope={args.scope} | today={today}")
         print("=" * 60)

@@ -83,7 +83,9 @@ def append_or_create_archive(
         hl.write_with_eol(arch_path, header + chunk, default_eol)
 
 
-def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Optional[str]:
+def archive_status_file(
+    root: Path, cfg: hl.HandoffConfig, keep: int, today: date, dry_run: bool
+) -> Optional[str]:
     status_path = root / "STATUS.md"
     if not status_path.is_file():
         print("STATUS.md：不存在，跳过。")
@@ -134,8 +136,8 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
         if d is not None
     ]
     arch_date_str = max(arch_dates).isoformat() if arch_dates else today.isoformat()
-    rel_arch = f"文档/STATUS_归档_至{arch_date_str}.md"
-    arch_path = root / "文档" / f"STATUS_归档_至{arch_date_str}.md"
+    rel_arch = f"{cfg.docs_dir}/STATUS_归档_至{arch_date_str}.md"
+    arch_path = root / cfg.docs_dir / f"STATUS_归档_至{arch_date_str}.md"
 
     new_preamble = upsert_quote_ref(
         preamble,
@@ -175,7 +177,12 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
 
 
 def archive_agents_sec3(
-    root: Path, agents_keep: int, today: date, dry_run: bool, status_eol: Optional[str] = None
+    root: Path,
+    cfg: hl.HandoffConfig,
+    agents_keep: int,
+    today: date,
+    dry_run: bool,
+    status_eol: Optional[str] = None,
 ) -> None:
     agents_path = root / "AGENTS.md"
     if not agents_path.is_file():
@@ -233,8 +240,8 @@ def archive_agents_sec3(
 
     arch_dates = [d for b in to_archive_blocks for d in [hl.latest_date(b, today)] if d is not None]
     arch_date_str = max(arch_dates).isoformat() if arch_dates else "历史"
-    rel_arch = f"文档/AGENTS_归档_至{arch_date_str}.md"
-    arch_path = root / "文档" / f"AGENTS_归档_至{arch_date_str}.md"
+    rel_arch = f"{cfg.docs_dir}/AGENTS_归档_至{arch_date_str}.md"
+    arch_path = root / cfg.docs_dir / f"AGENTS_归档_至{arch_date_str}.md"
 
     clean_lead = [ln for ln in s3.lead_lines if ln.strip()]
     updated_lead = upsert_quote_ref(
@@ -296,8 +303,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     today = datetime.strptime(args.today, "%Y-%m-%d").date() if args.today else date.today()
-    status_eol = archive_status_file(root, args.keep, today, args.dry_run)
-    archive_agents_sec3(root, args.agents_keep, today, args.dry_run, status_eol=status_eol)
+    cfg = hl.load_handoff_config(root)
+    for w in cfg.warnings:
+        print(f"提示：{w}")
+    status_eol = archive_status_file(root, cfg, args.keep, today, args.dry_run)
+    archive_agents_sec3(root, cfg, args.agents_keep, today, args.dry_run, status_eol=status_eol)
     return 0
 
 
