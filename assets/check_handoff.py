@@ -210,7 +210,7 @@ def review_card_id(fp: Path, states: dict[str, tuple[str, str]]) -> Optional[str
 
 
 def check_decision_chain_a013(agents: str) -> tuple[bool, str]:
-    tables = hl.parse_decision_tables(agents, all_sections=False)
+    tables = hl.parse_decision_tables(agents, all_sections=True)
     if not tables:
         doc = hl.parse_markdown(agents)
         has_sec = any(
@@ -221,11 +221,16 @@ def check_decision_chain_a013(agents: str) -> tuple[bool, str]:
         )
         return (True, "0 条已登记决策") if has_sec else (True, "未设 §3.5 表")
 
+    issues: list[str] = []
+    if len(tables) > 1:
+        issues.append(f"检测到 {len(tables)} 张决策登记表（应合并为唯一一张表）")
+
     rows = [r for tbl in tables for r in tbl.rows]
     if not rows:
+        if issues:
+            return False, f"{len(issues)} 处不一致：" + "；".join(issues)
         return True, "0 条已登记决策"
 
-    issues: list[str] = []
     seen_ids: dict[str, int] = {}
     by_id: dict[str, hl.DecisionRow] = {}
     for r in rows:

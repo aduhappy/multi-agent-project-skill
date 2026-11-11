@@ -2229,6 +2229,35 @@ def test_042_v7_misplaced_review_in_cards_dir() -> None:
         )
 
 
+def test_042_v8_multiple_decision_tables() -> None:
+    """0.4.2 V8: multiple decision tables in AGENTS.md emit a warning AND both tables have replacement chains checked."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        two_tables_agents = (
+            "# AGENTS\n\n> **Scope: line**\n\n> ⚡ **TL;DR**\n"
+            "> - **当前阶段**：初稿（2026-09-15）\n> - **下一步**：写方法\n> - **阻塞**：无\n\n"
+            "## 3. 现在在哪\n- 2026-09-15：初稿完成\n\n"
+            "## 3.5 决策登记表\n"
+            "| ID | 状态 | 决策 | 取代了谁 | 被谁取代 |\n"
+            "|---|---|---|---|---|\n"
+            "| D-01 | ACTIVE | 初版口径 | -- | -- |\n\n"
+            "## 3.5 补充决策登记表\n"
+            "| ID | 状态 | 决策 | 取代了谁 | 被谁取代 |\n"
+            "|---|---|---|---|---|\n"
+            "| D-02 | SUPERSEDED | 二版口径 | -- | -- |\n\n"
+            "## 4. 任务看板\n- [x] T1 初稿\n"
+        )
+        write(line / "AGENTS.md", two_tables_agents)
+        rc, out = run(line)
+        check(
+            rc == 0
+            and "[A013] ⚠️" in out
+            and "2 张决策登记表" in out
+            and "D-02 为 SUPERSEDED 但未填" in out,
+            f"V8 must warn on 2 decision tables AND check replacement chain in 2nd table:\n{out}",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2411,6 +2440,7 @@ def main(argv: list[str] | None = None) -> int:
     test_042_v5_h3_progress_section()
     test_042_v6_card_id_case_and_collision()
     test_042_v7_misplaced_review_in_cards_dir()
+    test_042_v8_multiple_decision_tables()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")

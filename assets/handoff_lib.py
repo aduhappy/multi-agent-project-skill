@@ -1503,10 +1503,11 @@ def _extract_tables_from_blocks(section_title: str, tbl_blocks: list[Block]) -> 
     return tables
 
 
-def parse_decision_tables(agents_text: str, *, all_sections: bool = False) -> list[DecisionTable]:
-    """Extract decision registry tables from §3.5 / '决策登记表' sections."""
+def parse_decision_tables(agents_text: str, *, all_sections: bool = True) -> list[DecisionTable]:
+    """Extract decision registry tables from §3.5 / '决策登记表' sections (and stray decision tables elsewhere when all_sections=True)."""
     doc = parse_markdown(agents_text)
     sections: list[tuple[str, list[Block]]] = []
+    covered_lines: set[int] = set()
     i = 0
     nb = len(doc.blocks)
     while i < nb:
@@ -1523,6 +1524,7 @@ def parse_decision_tables(agents_text: str, *, all_sections: bool = False) -> li
                         break
                     if bj.kind == "table_row":
                         tbls.append(bj)
+                        covered_lines.add(bj.start_line)
                     j += 1
                 sections.append((sec_title, tbls))
                 if not all_sections:
@@ -1534,6 +1536,12 @@ def parse_decision_tables(agents_text: str, *, all_sections: bool = False) -> li
     out: list[DecisionTable] = []
     for stitle, tbls in sections:
         out.extend(_extract_tables_from_blocks(stitle, tbls))
+
+    if all_sections:
+        other_tbls = [b for b in doc.blocks if b.kind == "table_row" and b.start_line not in covered_lines]
+        for cand in _extract_tables_from_blocks("(其他节)", other_tbls):
+            if cand.has_replaces_col or cand.has_replaced_by_col:
+                out.append(cand)
     return out
 
 
