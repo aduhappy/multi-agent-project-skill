@@ -93,7 +93,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 ## 只要模板文件，不要 skill
 
-不想装成 skill、只想要骨架文件？直接复制 [`assets/`](assets/) 目录下的模板与脚本到你的项目（单线拷 `assets/AGENTS.md`，多线课题根拷 `assets/ROOT_AGENTS.md`；任务卡与索引拷 `assets/任务规划_模板.md`、`assets/任务卡_README.md`；自检与归档脚本拷 `assets/check_handoff.py`、`assets/archive_status.py`）。
+不想装成 skill、只想要骨架文件？直接复制 [`assets/`](assets/) 目录下的模板与脚本到你的项目（单线拷 `assets/AGENTS.md`，多线课题根拷 `assets/ROOT_AGENTS.md`；任务卡与索引拷 `assets/任务规划_模板.md`、`assets/任务卡_README.md`；自检与归档脚本一起拷 `assets/handoff_lib.py`、`assets/check_handoff.py`、`assets/archive_status.py` 三个文件到 `scripts/`）。
 
 > ⚠️ 中文文件名注意：如果你的 toolchain 对中文路径挑剔，在**你自己的项目里**改用 ASCII 文件名并更新线级入口指针；不要改变本 skill 的安装目录 `multi-agent-project`。
 
@@ -103,7 +103,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 为避免 README 与技能定义出现双份清单漂移，详细规范统一维护在 [`SKILL.md`](SKILL.md) 中：
 
-- **生成的文件骨架**：`AGENTS.md` + `STATUS.md` + 薄指针 + `文档/`（`任务卡/`、`任务卡_README.md`、可选 `环境坑.md`/`决策记录/`/`词汇表.md`）+ `<数据集>/来源.txt` + `scripts/`（`check_handoff.py`、`archive_status.py`）。完整目录树见 [`SKILL.md` §文件骨架](SKILL.md#文件骨架)。
+- **生成的文件骨架**：`AGENTS.md` + `STATUS.md` + 薄指针 + `文档/`（`任务卡/`、`任务卡_README.md`、可选 `环境坑.md`/`决策记录/`/`词汇表.md`）+ `<数据集>/来源.txt` + `scripts/`（`handoff_lib.py`、`check_handoff.py`、`archive_status.py`）。完整目录树见 [`SKILL.md` §文件骨架](SKILL.md#文件骨架)。
 - **`AGENTS.md` 板块与边界**：顶部 `TL;DR` + `§1–§7`（含 `§3.5` 决策登记表、`§5` 行为铁律与 `§5.5` 路径约定分离）。各节职责见 [`SKILL.md` §AGENTS.md 板块与边界](SKILL.md#agentsmd-板块与边界照-assetsagentsmd-填)，填好完整样例见 [`references/example_filled_AGENTS.md`](references/example_filled_AGENTS.md)。
 - **跨软件能续的 10 条硬要求与 5 步工作流**：纯 Markdown、数据带 `来源.txt`、角色与 scope 收工纪律、工作盘分流、进门先读并 grep 决策表、数字口径单一来源、坏产物退役隔离、工具/模型/家族留痕、双源交叉测量、按需记哈希。逐条说明见 [`SKILL.md` §跨软件能续的 10 条硬要求](SKILL.md#跨软件能续的-10-条硬要求)，按需进阶模块见 [`references/advanced.md`](references/advanced.md)。
 

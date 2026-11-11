@@ -56,7 +56,7 @@ from typing import Optional
 
 sys.dont_write_bytecode = True
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 for _stream in (sys.stdout, sys.stderr):
     try:

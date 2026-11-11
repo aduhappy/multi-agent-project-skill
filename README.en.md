@@ -14,7 +14,7 @@
 - **One authoritative entry (`AGENTS.md`)**: North Star, current snapshot (§3), grep-friendly decision registry (§3.5), task board (§4), behavioral & unit invariants (§5), scratch/cloud-sync path rules (§5.5), and environment paths (§7). Supports both single-line (`Scope: line`) and multi-line root index (`Scope: index`) layouts.
 - **Thin pointers**: `CLAUDE.md` (with `@AGENTS.md` import), `GEMINI.md`, `.cursor/rules/multi-agent.mdc`, and `.github/copilot-instructions.md` pointing to the same `AGENTS.md`.
 - **Self-contained task cards & incremental handoffs**: One card per task (execution + cross-family independent review prompts) under `文档/任务卡/`, plus bounded 4-section handoffs (`≤800` chars) in `STATUS.md`.
-- **Zero-dependency Python utilities**: `check_handoff.py` (blocking gates `H001–H009` + advisories `A001–A015`) and `archive_status.py` (line-ending-preserving archiver for `STATUS.md` and `AGENTS.md` §3).
+- **Zero-dependency Python utilities**: `handoff_lib.py` (shared block-based Markdown parser & path config), `check_handoff.py` (blocking gates `H001–H009` + advisories `A001–A015`, with `--role`), and `archive_status.py` (line-ending-preserving archiver for `STATUS.md` and `AGENTS.md` §3 that retains active cards' handoffs).
 
 ## Installation
 

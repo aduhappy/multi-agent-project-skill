@@ -15,6 +15,7 @@ sys.dont_write_bytecode = True
 
 REPO = Path(__file__).resolve().parents[1]
 ASSETS_DIR = REPO / "assets"
+HANDOFF_LIB = ASSETS_DIR / "handoff_lib.py"
 CHECKER = ASSETS_DIR / "check_handoff.py"
 ARCHIVER = ASSETS_DIR / "archive_status.py"
 TODAY = "2026-09-15"
@@ -76,6 +77,7 @@ if str(ASSETS_DIR) not in sys.path:
 
 import archive_status as archiver_mod  # noqa: E402
 import check_handoff as checker_mod  # noqa: E402
+import handoff_lib as hl_mod  # noqa: E402
 
 
 def _clean_env() -> dict[str, str]:
@@ -1133,7 +1135,7 @@ def test_041_d1_github_actions_ci() -> None:
 
 def test_041_d2_no_assets_pycache() -> None:
     """D2: Running test_skill.py and scripts (even without -B) leaves no __pycache__ inside assets/."""
-    for fp in (REPO / "tests" / "test_skill.py", CHECKER, ARCHIVER):
+    for fp in (REPO / "tests" / "test_skill.py", HANDOFF_LIB, CHECKER, ARCHIVER):
         src = fp.read_text(encoding="utf-8")
         check("dont_write_bytecode = True" in src, f"{fp.name} must set sys.dont_write_bytecode = True")
 
@@ -1152,9 +1154,10 @@ def test_041_d2_no_assets_pycache() -> None:
 
 
 def test_041_d3_versions_and_changelog() -> None:
-    """D3: Both scripts expose __version__ == '0.4.1' and --version; CHANGELOG.md documents 0.4.1."""
-    check(getattr(checker_mod, "__version__", None) == "0.4.1", "check_handoff.__version__ must be '0.4.1'")
-    check(getattr(archiver_mod, "__version__", None) == "0.4.1", "archive_status.__version__ must be '0.4.1'")
+    """D3: All three scripts expose __version__ == '0.4.2' and --version; CHANGELOG.md documents 0.4.2."""
+    check(getattr(hl_mod, "__version__", None) == "0.4.2", "handoff_lib.__version__ must be '0.4.2'")
+    check(getattr(checker_mod, "__version__", None) == "0.4.2", "check_handoff.__version__ must be '0.4.2'")
+    check(getattr(archiver_mod, "__version__", None) == "0.4.2", "archive_status.__version__ must be '0.4.2'")
 
     for script in (CHECKER, ARCHIVER):
         res = subprocess.run(
@@ -1162,10 +1165,11 @@ def test_041_d3_versions_and_changelog() -> None:
             capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
         )
         combined = (res.stdout + res.stderr).strip()
-        check(res.returncode == 0 and "0.4.1" in combined, f"{script.name} --version must output 0.4.1, got: {combined}")
+        check(res.returncode == 0 and "0.4.2" in combined, f"{script.name} --version must output 0.4.2, got: {combined}")
 
     changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
-    check(bool(re.search(r"(?m)^##\s+0\.4\.1\b", changelog)), "CHANGELOG.md must have a ## 0.4.1 section")
+    check(bool(re.search(r"(?m)^##\s+0\.4\.2\b", changelog)), "CHANGELOG.md must have a ## 0.4.2 section")
+    check(bool(re.search(r"(?m)^##\s+0\.4\.1\b", changelog)), "CHANGELOG.md must preserve ## 0.4.1 section")
 
 
 def test_041_r1_mixed_heading_levels_and_archive() -> None:
@@ -2280,6 +2284,297 @@ def test_042_v9_a002_numeric_and_tuples() -> None:
         check(rc2 == 0 and "[A002] ✅" in out2, f"identical numeric/tuple sets must pass A002:\n{out2}")
 
 
+def test_042_conv1_three_files_and_missing_lib() -> None:
+    """0.4.2 Conv1: SKILL.md, scripts_README.md, README.md, README.en.md list 3 scripts; missing handoff_lib.py exits 2."""
+    for rel in ("SKILL.md", "assets/scripts_README.md", "README.md", "README.en.md"):
+        txt = (REPO / rel).read_text(encoding="utf-8")
+        for fn in ("handoff_lib.py", "check_handoff.py", "archive_status.py"):
+            check(fn in txt, f"{rel} must list {fn}")
+
+    with tempfile.TemporaryDirectory() as temp:
+        tdir = Path(temp) / "scripts"
+        tdir.mkdir(parents=True)
+        for src in (CHECKER, ARCHIVER):
+            dst = tdir / src.name
+            dst.write_bytes(src.read_bytes())
+            res = subprocess.run(
+                [sys.executable, "-B", str(dst), str(Path(temp))],
+                capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+            )
+            combined = (res.stdout + res.stderr).strip()
+            check(
+                res.returncode == 2 and "请把 handoff_lib.py 一起复制到同一目录" in combined,
+                f"{src.name} without handoff_lib.py must exit 2 with copy hint, got rc={res.returncode}: {combined}",
+            )
+
+
+def test_042_gate3_syntax_variants() -> None:
+    """0.4.2 Gate 3: table-driven syntax variants (>=12 per entrypoint across all 6 entrypoints + all review bug examples)."""
+    from datetime import date as d
+
+    # 1. 取卡面状态 (hl_mod.parse_card_state) — 15 variants
+    card_state_cases = [
+        ("c01_h2_standard", "# T1\n## 进度回写\n- 状态：⏳执行中\n", "⏳"),
+        ("c02_h3_progress_v5", "# T1\n### 进度回写（只改本节）\n- 状态：🟡待复核\n", "🟡"),
+        ("c03_h4_ignored", "# T1\n#### 进度回写\n- 状态：✅已收口\n", None),
+        ("c04_fenced_bt_dir1_rev0_bug2", "# T1\n## 进度回写\n```markdown\n- 状态：✅已收口\n```\n- 状态：⬜可派\n", "⬜"),
+        ("c05_fenced_tilde_dir2_rev0_bug2", "# T1\n## 进度回写\n~~~\n- 状态：⬜可派\n~~~\n- 状态：✅已收口\n", "✅"),
+        ("c06_indented_code_rev1_bug1", "# T1\n## 进度回写\n示例写法：\n\n    - 状态：✅已收口\n\n- 状态：⬜可派\n", "⬜"),
+        ("c07_single_and_multi_comments_rev1_bug1", "# T1\n## 进度回写\n<!-- - 状态：✅ -->\n<!--\n- 状态：✅已收口\n-->\n- 状态：🔵待收口\n", "🔵"),
+        ("c08_inline_code_comment_rev2_adv1", "# T1\n## 进度回写\n说明：勿写裸 `<!--` 标记\n- 状态：⬜可派\n", "⬜"),
+        ("c09_empty_comments_rev2_adv1", "# T1\n## 进度回写\n<!-->\n<!--->\n- 状态：🟡待复核\n", "🟡"),
+        ("c10_unclosed_comment_and_fence", "# T1\n## 进度回写\n手滑 <!-- 未闭合\n```python\nx = 1\n- 状态：✅已收口\n", "✅"),
+        ("c11_star_halfwidth_colon_spaces_rev0_adv1", "# T1\n## 进度回写\n* 状态 : ⏳执行中   \n", "⏳"),
+        ("c12_plus_bold_fullwidth_colon", "# T1\n## 进度回写\n+ **状态** ： ⛔退回\n", "⛔"),
+        ("c13_bare_no_bullet_rev0_adv1", "# T1\n## 进度回写\n状态：🗄️作废\n", "🗄"),
+        ("c14_bom_crlf_trailing_ws", "\ufeff# T1\r\n## 进度回写   \r\n- 状态：✅已收口   \r\n", "✅"),
+        ("c15_blockquote_and_sublist_ignored", "# T1\n## 进度回写\n> - 状态：✅已收口\n  - 状态：✅已收口\n- 状态：⬜可派\n", "⬜"),
+    ]
+    check(len(card_state_cases) >= 12, "Entrypoint 1 must have >= 12 variants")
+    for name, md, expected in card_state_cases:
+        got = hl_mod.parse_card_state(md)
+        check(got == expected, f"[Gate3:parse_card_state:{name}] expected {expected!r}, got {got!r}")
+
+    # 2. 分交接段 (hl_mod.handoff_blocks + hl_mod.handoffs_latest_date) — 14 variants
+    ref_today = d(2026, 11, 11)
+    handoff_cases = [
+        ("h01_mixed_h2_then_h3_rev0_bug1", "## Handoff（2026-11-05）\n旧\n\n### 交接（2026-11-11）\n新\n", 2, d(2026, 11, 11)),
+        ("h02_mixed_h3_then_h2", "### 交接（2026-11-01）\n一\n\n## Handoff（2026-11-09）\n二\n", 2, d(2026, 11, 9)),
+        ("h03_h4_excluded_rev1_adv2", "#### Handoff（2026-11-11）\n正文\n", 0, None),
+        ("h04_slash_dot_cn_dates_rev0_bug3", "## 交接（2026/11/08）\nA\n## 交接（2026.11.09）\nB\n## 交接（2026年11月11日）\nC\n", 3, d(2026, 11, 11)),
+        ("h05_fenced_bt_and_tilde_fake", "## Handoff（2026-11-05）\n```md\n## Handoff（2026-11-11）\n```\n~~~\n### 交接（2026-11-10）\n~~~\n", 1, d(2026, 11, 5)),
+        ("h06_indented_code_fake", "## Handoff（2026-11-05）\n示例：\n\n    ## Handoff（2026-11-11）\n", 1, d(2026, 11, 5)),
+        ("h07_commented_out_handoff_rev2_adv3", "<!-- ## Handoff（2020-01-01） -->\n<!--\n## Handoff（2026-11-11）\n-->\n## Handoff（2026-11-08）\n真\n", 1, d(2026, 11, 8)),
+        ("h08_unclosed_comment_and_fence", "前言 <!-- 未闭合\n```\n## Handoff（2026-11-10）\n真\n", 1, d(2026, 11, 10)),
+        ("h09_inline_code_dates_and_comment", "## Handoff `<!-- 2026-12-01`（2026-11-09）\n正文 `2026-11-11`\n", 1, d(2026, 11, 9)),
+        ("h10_jiaohui_shuoming_excluded_rev0_adv7", "## 交回说明\nA\n## 交回（2026-11-05）\nB\n## T13c 交回（2026-11-10）\nC\n", 1, d(2026, 11, 10)),
+        ("h11_inner_4sec_subheadings", "## Handoff: 2026-11-10\n### 改了什么\nA\n### 怎么验证的\nB\n### 没做什么\nC\n### 不确定处\nD\n", 1, d(2026, 11, 10)),
+        ("h12_colons_bullets_trailing_ws", "## 交接 : 2026-11-07   \n* 改了什么：A\n+ 怎么验证的: B\n- 没做什么：C\n- 不确定处: D\n", 1, d(2026, 11, 7)),
+        ("h13_bom_crlf_trailing_note", "\ufeff# STATUS\r\n\r\n## Handoff（2026-11-09）\r\n正文\r\n\r\n> ⚠️ 提示\r\n", 1, d(2026, 11, 9)),
+        ("h14_table_with_blank_line_inside_seg", "## 2026-11-06 收工\n| 项 | 值 |\n|---|---|\n| A | 1 |\n\n| B | 2 |\n", 1, d(2026, 11, 6)),
+    ]
+    check(len(handoff_cases) >= 12, "Entrypoint 2 must have >= 12 variants")
+    for name, md, exp_cnt, exp_dt in handoff_cases:
+        blks = hl_mod.handoff_blocks(md)
+        _, arch_blks, _ = hl_mod.parse_status(md)
+        got_dt = hl_mod.handoffs_latest_date(blks, ref_today)
+        check(
+            len(blks) == exp_cnt and len(arch_blks) == exp_cnt and got_dt == exp_dt,
+            f"[Gate3:handoff:{name}] expected ({exp_cnt}, {exp_dt}), got ({len(blks)}/{len(arch_blks)}, {got_dt})",
+        )
+
+    # 3. 取 §3 日期 (hl_mod.extract_sec3_info) — 14 variants
+    sec3_cases = [
+        ("s01_template_example_rev0_bug4", "## 3. 现在在哪\n- 【待填：例 2026-06-15 完成底座】\n", None, True),
+        ("s02_bare_example_rev2_adv2", "## 3. 现在在哪\n- 例 T3 进行中（2026-06-15）\n- 2026-11-07：底座完成\n", d(2026, 11, 7), False),
+        ("s03_heading_date_rev1_bug2", "## 3. 现在在哪（截至 2026-11-10）\n- 2026-10-01：旧条\n", d(2026, 11, 10), False),
+        ("s04_inline_placeholder_rev1_bug3a", "## 3. 现在在哪\n- 2026-10-01：旧\n- 🔶 交付（2026-11-10）：报告已发【待填：页数】\n", d(2026, 11, 10), False),
+        ("s05_literal_ymd_rev1_bug3b", "## 3. 现在在哪\n- 2026-10-01：旧\n- ✅ 2026-11-10：日期写 YYYY-MM-DD 格式\n", d(2026, 11, 10), False),
+        ("s06_fenced_bt_and_tilde", "## 3. 现在在哪\n- 2026-11-05：真\n```\n2026-11-11\n```\n~~~\n2026-11-10\n~~~\n", d(2026, 11, 5), False),
+        ("s07_indented_code_vs_continuation", "## 3. 现在在哪\n- 2026-11-05：真\n  续行 2026-11-08\n\n    2026-11-11 缩进代码\n", d(2026, 11, 8), False),
+        ("s08_single_and_multi_comments", "## 3. 现在在哪\n<!-- 2026-11-11 -->\n<!--\n2026-11-10\n-->\n- 2026-11-06：真\n", d(2026, 11, 6), False),
+        ("s09_unclosed_comment_and_fence", "## 3. 现在在哪\n<!-- 未闭合\n```\n- 2026-11-09：真\n", d(2026, 11, 9), False),
+        ("s10_inline_code_date_ignored", "## 3. 现在在哪\n- 2026-11-06：跑 `--today 2026-11-11` 通过\n", d(2026, 11, 6), False),
+        ("s11_h3_h4_subheadings_kept", "## 3. 现在在哪\n### 阶段一\n* 2026-11-04 : A\n#### 细节\n+ 2026-11-09：B\n## 4. 任务看板\n- 2026-11-11\n", d(2026, 11, 9), False),
+        ("s12_slash_dot_cn_bom_crlf", "\ufeff## 3. 现在在哪   \r\n* 2026/11/03: A   \r\n+ 2026.11.06：B\r\n- 2026年11月10日：C\r\n", d(2026, 11, 10), False),
+        ("s13_archive_quote_excluded", "## 3. 现在在哪\n> 更早快照见 `文档/AGENTS_归档_至2026-11-11.md`。\n- 2026-11-07：真\n", d(2026, 11, 7), False),
+        ("s14_english_title_table_blank_line", "## Where We Are Now\n| 阶段 | 日期 |\n|---|---|\n| T1 | 2026-11-05 |\n\n| T2 | 2026-11-08 |\n", d(2026, 11, 8), False),
+    ]
+    check(len(sec3_cases) >= 12, "Entrypoint 3 must have >= 12 variants")
+    for name, md, exp_dt, exp_ph in sec3_cases:
+        info = hl_mod.extract_sec3_info(md, ref_today)
+        check(
+            info.latest_date == exp_dt and info.is_placeholder == exp_ph,
+            f"[Gate3:sec3:{name}] expected ({exp_dt}, {exp_ph}), got ({info.latest_date}, {info.is_placeholder})",
+        )
+
+    # 4. 取 TL;DR (hl_mod.extract_tldr_info) — 14 variants
+    tldr_cases = [
+        ("t01_blockquote_standard", "> ⚡ **TL;DR**\n> - **当前阶段**：T1–T9 ✅（2026-11-07）\n> - **下一步**：T10\n\n## 1. 北极星\n", True, True, d(2026, 11, 7)),
+        ("t02_bare_example_rev2_adv2", "> ⚡ **TL;DR**\n> - **当前阶段**：例 T3 进行中（2026-06-15）\n> - **下一步**：待定\n", True, False, None),
+        ("t03_inline_placeholder_rev1_bug3", "> ⚡ **TL;DR**\n> - **当前阶段**：2026-11-10 已交稿【待填：页码】\n", True, False, d(2026, 11, 10)),
+        ("t04_prose_eg_todo_ok", "> ⚡ **TL;DR**\n> - **当前阶段**：清 TODO（例：标准边界，2026-11-09，e.g. check）\n", True, True, d(2026, 11, 9)),
+        ("t05_h3_tldr_heading", "### ⚡ TL;DR\n* 当前阶段 : 完成（2026/11/08）\n+ 下一步：收口\n## 1. 北极星\n2026-11-11\n", True, True, d(2026, 11, 8)),
+        ("t06_h2_with_h4_sub_colons_bullets", "## TL;DR\n#### 摘要\n- 当前阶段: 2026.11.06\n* 下一步：2026年11月09日\n+ 阻塞: 无\n---\n", True, True, d(2026, 11, 9)),
+        ("t07_fenced_bt_and_tilde_ignored", "```md\n> ⚡ **TL;DR**\n> - 2026-11-11\n```\n> ⚡ **TL;DR**\n> - **当前阶段**：真（2026-11-06）\n~~~\n2026-11-10\n~~~\n---\n", True, True, d(2026, 11, 6)),
+        ("t08_indented_code_ignored", "    > ⚡ **TL;DR**\n    > - 2026-11-11\n\n> ⚡ **TL;DR**\n> - **当前阶段**：真（2026-11-05）\n", True, True, d(2026, 11, 5)),
+        ("t09_single_and_multi_comments", "<!-- > ⚡ **TL;DR** 2026-11-11 -->\n> ⚡ **TL;DR**\n<!--\n2026-11-10\n-->\n> - **当前阶段**：真（2026-11-07）\n", True, True, d(2026, 11, 7)),
+        ("t10_unclosed_comment_and_fence", "<!-- 未闭合\n```\n> ⚡ **TL;DR**\n> - **当前阶段**：真（2026-11-08）\n", True, True, d(2026, 11, 8)),
+        ("t11_inline_code_ignored", "> ⚡ **TL;DR**\n> - **当前阶段**：修 `<!-- 2026-11-11`（2026-11-09）\n", True, True, d(2026, 11, 9)),
+        ("t12_bom_crlf_trailing_ws", "\ufeff> ⚡ **TL;DR**   \r\n> - **当前阶段**：完成（2026-11-08）   \r\n\r\n## 1. 北极星\r\n", True, True, d(2026, 11, 8)),
+        ("t13_table_with_blank_line", "## TL;DR\n| 项 | 值 |\n|---|---|\n| 阶段 | 2026-11-04 |\n\n| 更新 | 2026-11-09 |\n## 1. 北极星\n", True, True, d(2026, 11, 9)),
+        ("t14_missing_tldr", "# AGENTS\n\n## 1. 北极星\n2026-11-10\n", False, False, None),
+    ]
+    check(len(tldr_cases) >= 12, "Entrypoint 4 must have >= 12 variants")
+    for name, md, exp_found, exp_filled, exp_dt in tldr_cases:
+        ti = hl_mod.extract_tldr_info(md, ref_today)
+        got_filled = ti.exists and not ti.unfilled
+        check(
+            ti.exists == exp_found and got_filled == exp_filled and ti.latest_date == exp_dt,
+            f"[Gate3:tldr:{name}] expected ({exp_found}, {exp_filled}, {exp_dt}), got ({ti.exists}, {got_filled}, {ti.latest_date})",
+        )
+
+    # 5. 读决策表 (hl_mod.parse_decision_tables) — 14 variants
+    decision_cases = [
+        ("d01_h2_standard", "## 3.5 决策登记表\n| ID | 状态 | 决策 | 取代了谁 | 被谁取代 |\n|---|---|---|---|---|\n| D-01 | ACTIVE | 口径 | -- | -- |\n", 1, ["D-1"]),
+        ("d02_h3_title", "### 决策登记表（权威）\n| ID | 状态 | 决策 |\n|---|---|---|\n| D-02 | ACTIVE | 口径 |\n", 1, ["D-2"]),
+        ("d03_h4_inside_not_stopping", "## 3.5 决策登记表\n#### 子表\n| ID | 状态 | 决策 |\n|---|---|---|\n| D-03 | ACTIVE | 口径 |\n", 1, ["D-3"]),
+        ("d04_two_sections_rev0_adv6_v8", "## 3.5 决策登记表\n| ID | 状态 |\n|---|---|\n| D-01 | ACTIVE |\n\n## 3.5 补充表\n| ID | 状态 |\n|---|---|\n| D-02 | ACTIVE |\n", 2, ["D-1", "D-2"]),
+        ("d05_two_tables_same_sec_v8", "## 3.5 决策登记表\n| ID | 状态 |\n|---|---|\n| D-01 | ACTIVE |\n\n说明段落\n\n| ID | 状态 |\n|---|---|\n| D-02 | ACTIVE |\n", 2, ["D-1", "D-2"]),
+        ("d06_blank_lines_in_table", "## 3.5 决策登记表\n| ID | 状态 |\n\n|---|---|\n| D-01 | ACTIVE |\n\n| D-02 | SUPERSEDED |\n", 1, ["D-1", "D-2"]),
+        ("d07_id_norm_rev0_adv3", "## 3.5 决策登记表\n| ID | 状态 | 取代了谁 | 被谁取代 |\n|---|---|---|---|\n| d-038 | SUPERSEDED | -- | D51 |\n| D-51 | ACTIVE | D38 | -- |\n", 1, ["D-38", "D-51"]),
+        ("d08_inline_code_and_escaped_pipes", "## 3.5 决策登记表\n| ID | 状态 | 决策 | 取代了谁 | 被谁取代 |\n|---|---|---|---|---|\n| D-09 | ACTIVE | 含 `x|y` 与 a\\|b | -- | -- |\n", 1, ["D-9"]),
+        ("d09_fenced_bt_and_tilde_ignored", "## 3.5 决策登记表\n```\n| ID | 状态 |\n|---|---|\n| D-99 | ACTIVE |\n```\n~~~\n| ID | 状态 |\n|---|---|\n| D-98 | ACTIVE |\n~~~\n| ID | 状态 |\n|---|---|\n| D-01 | ACTIVE |\n", 1, ["D-1"]),
+        ("d10_indented_table_supported", "## 3.5 决策登记表\n    | ID | 状态 |\n    |---|---|\n    | D-04 | ACTIVE |\n", 1, ["D-4"]),
+        ("d11_single_and_multi_comments", "## 3.5 决策登记表\n<!-- | D-99 | ACTIVE | -->\n<!--\n| ID | 状态 |\n|---|---|\n| D-98 | ACTIVE |\n-->\n| ID | 状态 |\n|---|---|\n| D-05 | ACTIVE <!-- 注释 --> |\n", 1, ["D-5"]),
+        ("d12_unclosed_comment_and_fence", "## 3.5 决策登记表\n备注 <!-- 未闭合\n```\n| ID | 状态 |\n|---|---|\n| D-06 | ACTIVE |\n", 1, ["D-6"]),
+        ("d13_cn_headers_colons_bullets", "## 3.5 决策登记表\n| 编号 | 状态 | 说明: 含 -/*/+ | 取代了谁 | 被谁取代 |\n|---|---|---|---|---|\n| D-07 | ACTIVE | a:b：c   | D-01、D-02 | — |\n", 1, ["D-7"]),
+        ("d14_bom_crlf_placeholder_skipped", "\ufeff## 3.5 决策登记表   \r\n| ID | 状态 |\r\n|---|---|\r\n| 【待填：D-01】 | ACTIVE |\r\n| D-08 | ACTIVE |   \r\n", 1, ["D-8"]),
+    ]
+    check(len(decision_cases) >= 12, "Entrypoint 5 must have >= 12 variants")
+    for name, md, exp_tcnt, exp_ids in decision_cases:
+        tbls = hl_mod.parse_decision_tables(md, all_sections=True)
+        got_ids = [r.norm_id for t in tbls for r in t.rows]
+        check(
+            len(tbls) == exp_tcnt and got_ids == exp_ids,
+            f"[Gate3:decision:{name}] expected ({exp_tcnt}, {exp_ids}), got ({len(tbls)}, {got_ids})",
+        )
+
+    # 6. 读看板行 (hl_mod.parse_board_items + checker_mod.sec4_card_drifts) — 14 variants
+    board_cases = [
+        ("b01_dash_star_plus_bullets", "## 4. 任务看板\n- [x] **T1**\n* [ ] **T2**\n+ [X] **T3**\n", [True, False, True], {"T1": ("✅", "T1.md"), "T2": ("⬜", "T2.md"), "T3": ("🗄", "T3.md")}, []),
+        ("b02_multi_cards_inline_emoji", "## 4. 任务看板\n- [ ] **T10g**✅、**T10b**⬜　- [x] **T11**\n", [False], {"T10g": ("✅", "T10g.md"), "T10b": ("⬜", "T10b.md"), "T11": ("✅", "T11.md")}, []),
+        ("b03_case_insensitive_slash_rev0_adv2_v6", "## 4. 任务看板\n- [ ] **T12a/b**✅\n- [ ] **T1 初稿**\n", [False, False], {"t12a": ("✅", "t12a.md"), "T12B": ("✅", "T12B.md"), "t1": ("✅", "t1.md")}, ["t1 卡面 ✅／§4 未勾"]),
+        ("b04_parens_dependency_masked", "## 4. 任务看板\n- [ ] **T11 二期**（依赖 T10，由 T12g 接续）\n", [False], {"T10": ("✅", "T10.md"), "T12g": ("✅", "T12g.md"), "T11": ("⬜", "T11.md")}, []),
+        ("b05_template_placeholders", "## 4. 任务看板\n- [ ] **T1 【待填】**\n- [ ] Tx 示例：任务\n- [x] **T2 真任务**\n", [False, False, True], {"T2": ("✅", "T2.md")}, []),
+        ("b06_h3_h4_kept_stops_at_h2", "## 4. 任务看板\n### 一期\n- [x] **T1**\n#### 细节\n- [ ] **T2**\n## 5. 铁律\n- [x] **T99**\n", [True, False], {"T1": ("✅", "T1.md"), "T2": ("⏳", "T2.md"), "T99": ("⬜", "T99.md")}, []),
+        ("b07_fenced_bt_and_tilde_ignored", "## 4. 任务看板\n```\n- [x] **T99**\n```\n~~~\n- [ ] **T98**\n~~~\n- [x] **T1**\n", [True], {"T99": ("⬜", "T99.md"), "T1": ("✅", "T1.md")}, []),
+        ("b08_indented_code_and_sublist_ignored", "## 4. 任务看板\n- [x] **T1**\n    - [ ] **T99 子项**\n\n    - [x] **T98 缩进代码**\n", [True], {"T1": ("✅", "T1.md"), "T99": ("✅", "T99.md"), "T98": ("⬜", "T98.md")}, []),
+        ("b09_single_and_multi_comments", "## 4. 任务看板\n<!-- - [x] **T99** -->\n<!--\n- [x] **T98**\n-->\n- [x] **T1** <!-- 备注 -->\n", [True], {"T99": ("⬜", "T99.md"), "T1": ("✅", "T1.md")}, []),
+        ("b10_unclosed_comment_and_fence", "## 4. 任务看板\n<!-- 未闭合\n```\n- [x] **T1**\n", [True], {"T1": ("✅", "T1.md")}, []),
+        ("b11_inline_code_card_ignored", "## 4. 任务看板\n- [x] **T1** —— 参看 `T2` 脚本\n", [True], {"T1": ("✅", "T1.md"), "T2": ("⬜", "T2.md")}, []),
+        ("b12_colons_trailing_ws", "## 4. 任务看板\n- [x] **T1**：初稿   \n* [ ] **T2**: 方法   \n", [True, False], {"T1": ("✅", "T1.md"), "T2": ("⬜", "T2.md")}, []),
+        ("b13_bom_crlf_continuation", "\ufeff## 4. 任务看板\r\n- [x] **T1**   \r\n  续行说明\r\n", [True], {"T1": ("✅", "T1.md")}, []),
+        ("b14_table_with_blank_line_alongside", "## 4. 任务看板\n| 批 | 说明 |\n|---|---|\n| 1 | A |\n\n| 2 | B |\n\n- [x] **T1**\n", [True], {"T1": ("✅", "T1.md")}, []),
+    ]
+    check(len(board_cases) >= 12, "Entrypoint 6 must have >= 12 variants")
+    for name, md, exp_checked, st_map, exp_drifts in board_cases:
+        items = hl_mod.parse_board_items(md)
+        got_checked = [it.checked for it in items]
+        got_drifts = checker_mod.sec4_card_drifts(items, st_map)
+        check(
+            got_checked == exp_checked and got_drifts == exp_drifts,
+            f"[Gate3:board:{name}] expected ({exp_checked}, {exp_drifts}), got ({got_checked}, {got_drifts})",
+        )
+
+
+def test_042_gate4_fuzz_mutations() -> None:
+    """0.4.2 Gate 4: fixed seed, 200 random mutations x 7 files (AGENTS.md, STATUS.md, 5 cards) -> no crash, <=5s, line conservation."""
+    import contextlib
+    import random
+    import time
+    from io import StringIO
+
+    rng = random.Random(20261111)
+    tokens = ["<!--", "-->", "<!-->", "```", "~~~", "## 乱改小节", "### 交接（2026-09-15）", "- 状态：⬜可派", "`<!--`"]
+
+    def _mutate(text: str) -> str:
+        ls = text.splitlines()
+        for _ in range(rng.randint(1, 5)):
+            op = rng.choice(("delete", "swap", "insert", "append"))
+            if op == "delete" and ls:
+                del ls[rng.randrange(len(ls))]
+            elif op == "swap" and len(ls) >= 2:
+                i, j = rng.sample(range(len(ls)), 2)
+                ls[i], ls[j] = ls[j], ls[i]
+            elif op == "insert":
+                ls.insert(rng.randint(0, len(ls)), rng.choice(tokens))
+            elif op == "append" and ls:
+                idx = rng.randrange(len(ls))
+                ls[idx] = ls[idx] + " " + rng.choice(tokens)
+        return "\n".join(ls) + "\n"
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        # Enrich AGENTS.md (7 §3 entries) and STATUS.md (12 handoff blocks) + 5 cards so archiver actively archives!
+        sec3_items = "\n".join(f"- 2026-09-{d_i:02d}：阶段快照 {d_i}" for d_i in range(8, 16))
+        write(
+            line / "AGENTS.md",
+            "# AGENTS\n\n> **Scope: line**\n\n> ⚡ **TL;DR**\n"
+            "> - **当前阶段**：T5 进行中（2026-09-15）\n> - **下一步**：推进 T5\n> - **阻塞**：无\n\n"
+            f"## 3. 现在在哪\n{sec3_items}\n- `→ 本轮增量见 STATUS.md`\n\n"
+            "## 3.5 决策登记表\n| ID | 状态 | 决策 | 取代了谁 | 被谁取代 |\n|---|---|---|---|---|\n"
+            "| D-01 | SUPERSEDED | 旧 | -- | D-02 |\n| D-02 | ACTIVE | 新 | D-01 | -- |\n\n"
+            "## 4. 任务看板\n- [x] **T1**\n- [x] **T2**\n- [ ] **T3**\n- [ ] **T4**\n- [ ] **T5**\n",
+        )
+        segs = [
+            f"## Handoff（2026-09-{d_i:02d}，T{(d_i % 5) + 1}）\n"
+            "- **谁做的**：执行方\n- **改了什么**：改动。\n- **怎么验证的**：自检。\n- **没做什么**：无。\n- **不确定处**：无。"
+            for d_i in range(4, 16)
+        ]
+        write(line / "STATUS.md", "# STATUS\n\n> 更早的交接段已归档到 `文档/STATUS_归档_至2026-09-01.md`。\n\n" + "\n\n".join(segs) + "\n")
+        cards_dir = line / "文档" / "任务卡"
+        card_rels: list[Path] = []
+        for idx_c, st_c in enumerate(("✅已收口", "✅已收口", "⬜可派", "⏳执行中", "🟡待复核"), 1):
+            rel = Path("文档") / "任务卡" / f"T{idx_c}_卡{idx_c}.md"
+            card_rels.append(rel)
+            write(
+                line / rel,
+                f"# T{idx_c}\n\n## 进度回写\n- 状态：{st_c}\n- 执行方：工具【A】/ 模型【B】/ 家族【C】\n\n"
+                "## 📋 执行方派发提示词\n```text\n做\n```\n\n## 📋 独立复核方派发提示词\n```text\n核\n```\n",
+            )
+
+        targets = [Path("AGENTS.md"), Path("STATUS.md"), *card_rels]
+        orig = {rel: (line / rel).read_text(encoding="utf-8") for rel in targets}
+
+        for rel in targets:
+            for it in range(200):
+                for r2, txt2 in orig.items():
+                    (line / r2).write_text(txt2, encoding="utf-8")
+                for af in (line / "文档").glob("*_归档_*.md"):
+                    af.unlink()
+
+                (line / rel).write_text(_mutate(orig[rel]), encoding="utf-8")
+                before_st = [ln for ln in (line / "STATUS.md").read_text(encoding="utf-8").splitlines() if ln.strip()]
+                before_ag = [ln for ln in (line / "AGENTS.md").read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+                t0 = time.perf_counter()
+                buf = StringIO()
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                    rc_c = checker_mod.main([str(line), "--scope", "line", "--today", TODAY])
+                dt_c = time.perf_counter() - t0
+                check(rc_c in (0, 1) and dt_c <= 5.0, f"Gate4 checker failed/slow on {rel}#{it}: rc={rc_c}, dt={dt_c:.2f}s")
+
+                t1 = time.perf_counter()
+                buf2 = StringIO()
+                with contextlib.redirect_stdout(buf2), contextlib.redirect_stderr(buf2):
+                    rc_a = archiver_mod.main([str(line), "--keep", "6", "--agents-keep", "4", "--today", TODAY])
+                dt_a = time.perf_counter() - t1
+                check(rc_a == 0 and dt_a <= 5.0, f"Gate4 archiver failed/slow on {rel}#{it}: rc={rc_a}, dt={dt_a:.2f}s")
+
+                after_st = [ln.rstrip() for ln in (line / "STATUS.md").read_text(encoding="utf-8").splitlines()]
+                for af in (line / "文档").glob("STATUS_归档_*.md"):
+                    after_st.extend(ln.rstrip() for ln in af.read_text(encoding="utf-8").splitlines())
+                after_st_set = set(after_st)
+                lost_st = [
+                    ln for ln in before_st
+                    if ln.rstrip() not in after_st_set
+                    and not (ln.lstrip().startswith(">") and "STATUS_归档_" in ln and any(a.startswith(ln.rstrip().rstrip("。")) for a in after_st))
+                ]
+                check(not lost_st, f"Gate4 STATUS lost lines on {rel}#{it}: {lost_st[:3]}")
+
+                after_ag = [ln.rstrip() for ln in (line / "AGENTS.md").read_text(encoding="utf-8").splitlines()]
+                for af in (line / "文档").glob("AGENTS_归档_*.md"):
+                    after_ag.extend(ln.rstrip() for ln in af.read_text(encoding="utf-8").splitlines())
+                after_ag_set = set(after_ag)
+                lost_ag = [
+                    ln for ln in before_ag
+                    if ln.rstrip() not in after_ag_set
+                    and not (ln.lstrip().startswith(">") and "AGENTS_归档_" in ln and any(a.startswith(ln.rstrip().rstrip("。")) for a in after_ag))
+                ]
+                check(not lost_ag, f"Gate4 AGENTS lost lines on {rel}#{it}: {lost_ag[:3]}")
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2464,6 +2759,9 @@ def main(argv: list[str] | None = None) -> int:
     test_042_v7_misplaced_review_in_cards_dir()
     test_042_v8_multiple_decision_tables()
     test_042_v9_a002_numeric_and_tuples()
+    test_042_conv1_three_files_and_missing_lib()
+    test_042_gate3_syntax_variants()
+    test_042_gate4_fuzz_mutations()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")

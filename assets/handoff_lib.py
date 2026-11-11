@@ -24,7 +24,7 @@ from typing import Optional
 
 sys.dont_write_bytecode = True
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 DATE_RE = re.compile(r"(?<!\d)(20\d{2}-\d{2}-\d{2})(?!\d)")
 FLEX_DATE_TOKEN_RE = re.compile(
@@ -1443,7 +1443,7 @@ def _extract_tables_from_blocks(section_title: str, tbl_blocks: list[Block]) -> 
         next_is_sep = (
             pos + 1 < len(tbl_blocks)
             and tbl_blocks[pos + 1].is_separator
-            and tbl_blocks[pos + 1].start_line == b.start_line + 1
+            and tbl_blocks[pos + 1].start_line <= b.start_line + 2
         )
         clean_cells = [c.strip(" *`") for c in b.cells]
         if cur_header is None or next_is_sep:

@@ -31,9 +31,9 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 5. **建任务卡与索引**：新建 `文档/任务卡/T1_<主题>.md`（照 `assets/任务规划_模板.md`；已有项目可暂留平铺旧卡，迁移前先审计引用；建议模型不是实际运行身份），并复制 `assets/任务卡_README.md` 到 `文档/任务卡_README.md`（单卡项目也必拷）。🔴 **一个任务一张卡**（执行与独立复核同卡双提示词）；卡面规矩（谁改哪里、自由度、停止条件、冷读与两节式复核、核查不划范围、闸门查交付物本身、计数用脚本、主控收口三查、体积线）只写在 `任务卡_README.md`，此处不重复。多树/迁移场景另拷 `assets/迁移协议.md`、`assets/经验教训.md`。
 6. **可选专题文件**：有软件/环境坑时拷 `assets/环境坑.md` → `文档/环境坑.md`（单一来源）；按需建 `文档/决策记录/`、`文档/词汇表.md`（进阶板块见 [`references/advanced.md`](references/advanced.md)）。已完成且不再读的文档可标“已归档”节省认知负荷。
 7. **数据集溯源**：每类数据目录放 `来源.txt`（从 `assets/来源.txt` 复制）；无明确数据源可跳过。
-8. **脚本归位**：建 `scripts/` + `scripts/README.md`（`assets/scripts_README.md`），复制 `assets/check_handoff.py` 与 `assets/archive_status.py`（旧项目若有不认识 `--scope` 的旧检查器先整体替换）：
-   - 收工自检：线级跑 `python scripts/check_handoff.py --scope line`（脚本在上级目录用 `../scripts/`；多线根跑 `--scope index`），检查 H001–H009 阻断项与 A001–A015 提示项（体积、提示词完整性、大节拆解、状态同步、取代链自洽、【待填】余量、交接四节 ≤800 字、复核报告 `PASS`/`NEEDS_FIX` 结论行）。
-   - 一键归档：`STATUS.md` >40KB 或 `AGENTS.md` §3 >5 条时，跑 `python scripts/archive_status.py` 保留最近 N 段（默认 10）交接与 §3 最近 5 条快照，其余原样迁入 `文档/*_归档_至<日期>.md` 并在入口留一行 `>` 引用（不要写成带日期的 `#` 标题）。
+8. **脚本归位**：建 `scripts/` + `scripts/README.md`（`assets/scripts_README.md`），一起复制 `assets/handoff_lib.py`、`assets/check_handoff.py` 与 `assets/archive_status.py` 三个文件到 `scripts/`（旧项目先整体替换；自定义目录名可在项目根放 `handoff_config.json` 配置 `docs_dir`/`cards_dir`/`index_file`/`review_dirs`）：
+   - 收工自检：主控线级跑 `python scripts/check_handoff.py --scope line`（多线根跑 `--scope index`），执行方/复核方跑 `--role executor|reviewer --card T<卡号>`（只查 `STATUS.md` 最近交接段与本卡，跳过 `AGENTS.md`）；默认检查 H001–H009 阻断项与 A001–A015 提示项。
+   - 一键归档：`STATUS.md` >40KB 或 `AGENTS.md` §3 >5 条时，跑 `python scripts/archive_status.py` 保留最近 N 段（默认 10）交接、在用未收口卡的交接段与 §3 最近 5 条快照，其余原样迁入 `文档/*_归档_至<日期>.md` 并在入口留一行 `>` 引用（不要写成带日期的 `#` 标题）。
 9. **建 `STATUS.md`**：从 `assets/STATUS.md` 复制；首次建骨架即可填入建项当日的初始化交接段（“谁做的”一行＋四节：改了什么 / 怎么验证的 / 没做什么 / 不确定处，≤800 字，去掉 `YYYY-MM-DD` 占位符）。交接标题仅支持 `##` 或 `###`（`####` 及更深的标题不算交接段），须含 `Handoff` 或 `交接`（或以日期 / `T<卡号>+日期` 开头；日期支持 `YYYY-MM-DD`、`YYYY/MM/DD`、`YYYY.MM.DD`、`YYYY年MM月DD日`；`## 交回说明`、`## 归档说明` 等不算交接段）。
 10. **写入约束**：把环境路径、行为红线、工作盘分流分别填入线级 §7、§5、§5.5。
 11. **验证交回**：运行 `python scripts/check_handoff.py`（若保留了 `【待填】`/`YYYY-MM-DD` 占位符，H003–H005 会提示待填项；填妥当日初始状态后应全绿）与 `python scripts/archive_status.py --dry-run`（新骨架仅用 `--dry-run` 验证脚本能跑，日后收到 A003 `STATUS` 超限或 A008 §3 超限提示时再去掉 `--dry-run` 正式归档），告知用户已生成的文件、默认值和待确认项。
@@ -59,8 +59,9 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 ├── <数据集名>/来源.txt                ← DOI/URL/日期/口径/单位
 └── scripts/
     ├── README.md                      ← 脚本索引
-    ├── check_handoff.py               ← 收工交接自检（H001–H009 + A001–A015）
-    └── archive_status.py              ← STATUS 与 AGENTS §3 一键归档
+    ├── handoff_lib.py                 ← 共享 Markdown 块级解析与路径配置库
+    ├── check_handoff.py               ← 收工交接自检（H001–H009 + A001–A015，支持 --role）
+    └── archive_status.py              ← STATUS 与 AGENTS §3 一键归档（保留在用卡交接段）
 ```
 
 ## AGENTS.md 板块与边界（照 `assets/AGENTS.md` 填）
