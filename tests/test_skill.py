@@ -2092,6 +2092,41 @@ def test_042_v2_bare_placeholder_dates() -> None:
         )
 
 
+def test_042_v3_commented_handoff_headings() -> None:
+    """0.4.2 V3: commented-out handoff headings in STATUS.md are not counted as segments by checker or archiver."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        segs = [
+            f"## Handoff（2026-09-{d:02d}，T1 第{d}轮）\n"
+            f"- **谁做的**：主控\n- **改了什么**：完成第 {d} 轮。\n- **怎么验证的**：通过。\n- **没做什么**：无。\n- **不确定处**：无。"
+            for d in range(6, 16)  # exactly 10 real segments
+        ]
+        status_txt = (
+            "# STATUS.md\n\n"
+            "<!--\n## Handoff（2020-01-01，注释里的模板旧段）\n- 缺四节也不该报错\n-->\n\n"
+            "<!-- ## Handoff（2099-12-31，单行注释里的未来段） -->\n\n"
+            + "\n\n".join(segs)
+            + "\n"
+        )
+        write(line / "STATUS.md", status_txt)
+
+        check(len(checker_mod.handoff_blocks(status_txt)) == 10, "checker must ignore commented handoff headings (count=10)")
+        check(len(archiver_mod.parse_status(status_txt)[1]) == 10, "archiver must ignore commented handoff headings (count=10)")
+
+        rc, out = run(line)
+        check(
+            rc == 0 and "[H003] ✅" in out and "[H006] ✅" in out and "[A011] ✅" in out,
+            f"commented handoff headings must not pollute H003/H006/A011:\n{out}",
+        )
+
+        # With --keep 10 and 10 real segments (+ 2 commented phantom headings), archiver must treat as <=10 and no-op!
+        arc_rc, arc_out, _ = run_archiver(line, "--keep", "10")
+        check(
+            arc_rc == 0 and "共 10 段交接（≤ 10），无需归档" in arc_out,
+            f"archiver must count 10 segments and no-op instead of archiving commented heading:\n{arc_out}",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2269,6 +2304,7 @@ def main(argv: list[str] | None = None) -> int:
     test_042_conv5_archive_keep_active_cards()
     test_042_v1_comment_boundaries()
     test_042_v2_bare_placeholder_dates()
+    test_042_v3_commented_handoff_headings()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")

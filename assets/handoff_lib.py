@@ -113,9 +113,6 @@ CLAUSE_SEP_RE = re.compile(r"[、，,;；|]")
 DECISION_ID_RE = re.compile(r"[A-Za-z]+-\d+[A-Za-z0-9]*|[A-Za-z]+\d+[A-Za-z0-9]*")
 EMPTY_CELL_VALUES = {"", "-", "--", "---", "—", "——", "–", "无", "none", "n/a", "/"}
 
-# Compatibility switch isolated for Step 3 atomic commit (V3)
-_STATUS_SKIP_COMMENTED_HEADINGS = False
-
 
 # =====================================================================
 # File & EOL Helpers
@@ -1097,29 +1094,11 @@ def parse_status_document(text: str) -> StatusDocument:
     """Split STATUS.md into preamble, handoff blocks, inter-block gaps, and postamble using block AST."""
     doc = parse_markdown(text)
     lines = list(doc.lines)
-    headings: list[tuple[int, int, str]] = []
-
-    if _STATUS_SKIP_COMMENTED_HEADINGS:
-        for b in doc.blocks:
-            if b.kind == "heading":
-                clean_title = b.non_code_text().strip()
-                headings.append((b.start_line, b.level, clean_title))
-    else:
-        fenced_lines = {
-            ln_idx
-            for b in doc.blocks
-            if b.kind == "fenced_code"
-            for ln_idx in range(b.start_line, b.end_line)
-        }
-        for i, ln in enumerate(lines):
-            if i in fenced_lines:
-                continue
-            m = re.match(r"^\s*(#{1,6})\s+(.*)$", ln)
-            if m:
-                t_no_code = "".join(
-                    sp.raw for sp in parse_inlines(m.group(2).strip()) if sp.kind == "text"
-                ).strip()
-                headings.append((i, len(m.group(1)), t_no_code))
+    headings: list[tuple[int, int, str]] = [
+        (b.start_line, b.level, b.non_code_text().strip())
+        for b in doc.blocks
+        if b.kind == "heading"
+    ]
 
     handoff_heads = [
         (i, lvl, t)
@@ -1216,13 +1195,11 @@ def status_fallback_scan(status: str, today: date) -> tuple[Optional[date], list
     doc = parse_markdown(status)
     lines_buf: list[str] = []
     for b in doc.blocks:
-        if b.kind in ("fenced_code", "indented_code"):
-            continue
-        if _STATUS_SKIP_COMMENTED_HEADINGS and b.kind == "html_comment":
+        if b.kind in ("fenced_code", "indented_code", "html_comment"):
             continue
         if b.kind == "heading" and re.search(r"归档|archive", b.title, re.I):
             continue
-        lines_buf.append(b.raw_text if not _STATUS_SKIP_COMMENTED_HEADINGS else b.visible_text(include_code=False))
+        lines_buf.append(b.visible_text(include_code=False))
     joined = "\n".join(lines_buf)
     valid, invalid = scan_dates(joined)
     le_today = [d for d in valid if d <= today]

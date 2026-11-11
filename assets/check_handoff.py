@@ -101,15 +101,8 @@ def check_status_h005(status: str, today: date) -> tuple[bool, str]:
         return False, "STATUS.md 不存在或为空"
 
     doc = hl.parse_markdown(status)
-    active_blocks = [
-        b
-        for b in doc.blocks
-        if b.kind != "fenced_code" and (not hl._STATUS_SKIP_COMMENTED_HEADINGS or b.kind != "html_comment")
-    ]
-    unfenced_text = "\n".join(
-        b.raw_text if not hl._STATUS_SKIP_COMMENTED_HEADINGS else b.visible_text(include_code=True)
-        for b in active_blocks
-    )
+    active_blocks = [b for b in doc.blocks if b.kind not in ("fenced_code", "html_comment")]
+    unfenced_text = "\n".join(b.visible_text(include_code=True) for b in active_blocks)
 
     reasons: list[str] = []
     if len(status.strip()) <= 50:
@@ -139,7 +132,7 @@ def check_status_h005(status: str, today: date) -> tuple[bool, str]:
         if b.kind == "indented_code":
             continue
 
-        raw_lines = b.lines if not hl._STATUS_SKIP_COMMENTED_HEADINGS else b.visible_lines(include_code=True)
+        raw_lines = b.visible_lines(include_code=True)
         nocode_lines = b.visible_lines(include_code=False)
         for ln_raw, ln_nc in zip(raw_lines, nocode_lines):
             snap_m = re.match(
