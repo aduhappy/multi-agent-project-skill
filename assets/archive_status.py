@@ -11,7 +11,8 @@
 行为：
   - STATUS.md：交接段数 > --keep（默认 10）时，保留最近 N 段，其余原样移到
     文档/STATUS_归档_至<日期>.md（同日归档文件已存在则追加），并在入口头部留一行 `>` 引用。
-    （假设自首段交接起按时间正序追加在文末或整体倒序置顶，不支持乱序补记；交接段之间勿夹杂非交接同级 `##` 节。）
+    （交接标题支持 `##` 或 `###`，须含 `Handoff`/`交接`，或以日期 / `T<卡号>+日期` 开头；“交回说明”等不算交接；
+     日期支持 YYYY-MM-DD、YYYY/MM/DD、YYYY.MM.DD、YYYY年MM月DD日。）
   - AGENTS.md：§3 可归档快照条数 > --agents-keep（默认 5）时，保留最近 M 条（保留“阻塞”与 `→` 指针行），
     其余原样移到 文档/AGENTS_归档_至<日期>.md，并在 §3 留一行 `>` 引用。
     （若 AGENTS.md 超 25KB 是因 §3.5 决策登记表过长，需按 §3.5 规矩手动迁出全文，本脚本不拆决策表。）
@@ -37,9 +38,17 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 DATE_RE = re.compile(r"(?<!\d)(20\d{2}-\d{2}-\d{2})(?!\d)")
+FLEX_DATE_TOKEN_RE = re.compile(
+    r"(?<!\d)(20\d{2})(?:([-/.])(\d{1,2})\2(\d{1,2})(?![-/.]?\d)|\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日)"
+)
+HEADING_DATE_START_RE = re.compile(
+    r"^[\[（(【]?\s*20\d{2}(?:([-/.])\d{1,2}\1\d{1,2}(?![-/.]?\d)|\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)"
+)
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEAD_RE = re.compile(r"^\s*(#{1,6})\s+(.*)$")
-HANDOFF_INNER_HEAD_RE = re.compile(r"^[\*【\[]*(?:谁做的|改了什么|怎么验证|没做什么|不确定处)")
+HANDOFF_INNER_HEAD_RE = re.compile(
+    r"^(?:[-*+]|\d+[.、)])?\s*[\*【\[]*(?:谁做的|改了什么|怎么验证|没做什么|不确定处)"
+)
 
 
 def detect_eol(raw_bytes: bytes) -> str:
@@ -80,9 +89,14 @@ def unfenced_indices(lines: list[str]) -> set[int]:
 
 def extract_dates(text: str, today: date) -> list[date]:
     found: list[date] = []
-    for tok in DATE_RE.findall(text):
+    for m in FLEX_DATE_TOKEN_RE.finditer(text):
+        year = int(m.group(1))
+        if m.group(3) is not None:
+            month, day = int(m.group(3)), int(m.group(4))
+        else:
+            month, day = int(m.group(5)), int(m.group(6))
         try:
-            d = datetime.strptime(tok, "%Y-%m-%d").date()
+            d = date(year, month, day)
         except ValueError:
             continue
         if d <= today:
@@ -96,18 +110,20 @@ def latest_date(text: str, today: date) -> Optional[date]:
 
 
 def is_handoff_title(title: str) -> bool:
+    """Recognized handoff headings: contain Handoff/交接, start with date, or start with T<id> + date.
+    Headings like '## 交回说明' or '## 归档说明' are NOT handoff headings."""
     t = title.strip()
     if re.search(r"归档|archive|现状一屏|current\s+snapshot", t, re.I):
         return False
     return bool(
-        re.search(r"(?i)handoff|交接|交回", t)
-        or re.match(r"^[\[（(【]?\s*\d{4}[-/.]\d{2}[-/.]\d{2}", t)
-        or (re.match(r"^[\[（(【]?\s*T\d+[A-Za-z0-9-]*\b", t, re.I) and DATE_RE.search(t))
+        re.search(r"(?i)handoff|交接", t)
+        or HEADING_DATE_START_RE.match(t)
+        or (re.match(r"^[\[（(【]?\s*T\d+[A-Za-z0-9-]*\b", t, re.I) and FLEX_DATE_TOKEN_RE.search(t))
     )
 
 
-def parse_status(text: str) -> tuple[list[str], list[str], list[str]]:
-    """Split STATUS.md into (preamble_lines, handoff_blocks, postamble_lines)."""
+def _parse_status_with_gaps(text: str) -> tuple[list[str], list[str], list[str], list[str]]:
+    """Split STATUS.md into (preamble_lines, handoff_blocks, gaps_before_each_block, postamble_lines)."""
     lines = text.splitlines()
     unfenced = unfenced_indices(lines)
     headings: list[tuple[int, int, str]] = []
@@ -118,30 +134,37 @@ def parse_status(text: str) -> tuple[list[str], list[str], list[str]]:
 
     handoff_heads = [
         (i, lvl, t) for i, lvl, t in headings
-        if lvl >= 2 and is_handoff_title(t) and not HANDOFF_INNER_HEAD_RE.match(t)
+        if lvl in (2, 3) and is_handoff_title(t) and not HANDOFF_INNER_HEAD_RE.match(t)
     ]
     if not handoff_heads:
-        return lines, [], []
+        return lines, [], [], []
 
-    top_lvl = min(lvl for _, lvl, _ in handoff_heads)
-    top_handoff_starts = [i for i, lvl, _ in handoff_heads if lvl == top_lvl]
-    first_start = top_handoff_starts[0]
+    handoff_starts = {i for i, _, _ in handoff_heads}
+    first_start = handoff_heads[0][0]
     preamble = lines[:first_start]
 
     blocks: list[str] = []
+    gaps: list[str] = []
     postamble: list[str] = []
-    for idx, start in enumerate(top_handoff_starts):
-        next_same_or_higher = next(
+    prev_end = first_start
+    for idx, (start, cur_lvl, _) in enumerate(handoff_heads):
+        gap_str = "\n".join(lines[prev_end:start]).strip() if idx > 0 else ""
+        gaps.append(gap_str)
+        next_end = next(
             (
                 i for i, lvl, t in headings
-                if i > start and (lvl < top_lvl or (lvl == top_lvl and not HANDOFF_INNER_HEAD_RE.match(t)))
+                if i > start
+                and (
+                    i in handoff_starts
+                    or lvl < cur_lvl
+                    or (lvl == cur_lvl and not HANDOFF_INNER_HEAD_RE.match(t))
+                )
             ),
             len(lines),
         )
-        seg_lines = lines[start:next_same_or_higher]
-        # If this is the last handoff block, detach trailing template `> ⚠️` note or non-handoff sections
-        if idx == len(top_handoff_starts) - 1:
-            trailing_non_handoff = lines[next_same_or_higher:]
+        seg_lines = lines[start:next_end]
+        if idx == len(handoff_heads) - 1:
+            trailing_non_handoff = lines[next_end:]
             while seg_lines and not seg_lines[-1].strip():
                 seg_lines.pop()
             footer_tmp: list[str] = []
@@ -151,6 +174,13 @@ def parse_status(text: str) -> tuple[list[str], list[str], list[str]]:
                     seg_lines.pop()
             postamble = list(reversed(footer_tmp)) + trailing_non_handoff
         blocks.append("\n".join(seg_lines).strip())
+        prev_end = next_end
+    return preamble, blocks, gaps, postamble
+
+
+def parse_status(text: str) -> tuple[list[str], list[str], list[str]]:
+    """Split STATUS.md into (preamble_lines, handoff_blocks, postamble_lines)."""
+    preamble, blocks, _, postamble = _parse_status_with_gaps(text)
     return preamble, blocks, postamble
 
 
@@ -199,22 +229,39 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
     status_eol = detect_eol(raw_bytes)
     raw = raw_bytes.decode("utf-8-sig")
     before_bytes = len(raw_bytes)
-    preamble, blocks, postamble = parse_status(raw)
+    preamble, blocks, gaps, postamble = _parse_status_with_gaps(raw)
     total = len(blocks)
     if total <= keep:
         print(f"STATUS.md：共 {total} 段交接（≤ {keep}），无需归档（{before_bytes}B）。")
         return status_eol
 
-    d_first = latest_date(blocks[0], today)
-    d_last = latest_date(blocks[-1], today)
+    d_first = latest_date(blocks[0].splitlines()[0], today) or latest_date(blocks[0], today)
+    d_last = latest_date(blocks[-1].splitlines()[0], today) or latest_date(blocks[-1], today)
     if d_first and d_last and d_first > d_last:
-        kept = blocks[:keep]
-        to_archive = blocks[keep:]
+        kept_indices = list(range(keep))
+        arch_indices = list(range(keep, total))
     else:
-        to_archive = blocks[:-keep]
-        kept = blocks[-keep:]
+        arch_indices = list(range(total - keep))
+        kept_indices = list(range(total - keep, total))
 
-    arch_dates = [d for b in to_archive for d in [latest_date(b, today)] if d is not None]
+    to_archive = [blocks[i] for i in arch_indices]
+    kept_chunks: list[str] = []
+    first_kept = kept_indices[0]
+    if first_kept > 0 and not gaps[first_kept] and blocks[first_kept].startswith("### "):
+        prev_containers = [g for g in gaps[:first_kept] if g.startswith("## ")]
+        if prev_containers:
+            kept_chunks.append(prev_containers[-1])
+    for ki in kept_indices:
+        if gaps[ki]:
+            kept_chunks.append(gaps[ki])
+        kept_chunks.append(blocks[ki])
+
+    arch_dates = [
+        d
+        for b in to_archive
+        for d in [latest_date(b.splitlines()[0], today) or latest_date(b, today)]
+        if d is not None
+    ]
     arch_date_str = max(arch_dates).isoformat() if arch_dates else today.isoformat()
     rel_arch = f"文档/STATUS_归档_至{arch_date_str}.md"
     arch_path = root / "文档" / f"STATUS_归档_至{arch_date_str}.md"
@@ -225,7 +272,7 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
         default_prefix="更早的交接段已归档到",
         ref_rel=rel_arch,
     )
-    parts = ["\n".join(new_preamble).rstrip(), "\n\n".join(kept)]
+    parts = ["\n".join(new_preamble).rstrip(), "\n\n".join(kept_chunks)]
     if postamble and "\n".join(postamble).strip():
         parts.append("\n".join(postamble).strip())
     new_status_lf = "\n\n".join(p for p in parts if p) + "\n"
@@ -234,7 +281,7 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
 
     if dry_run:
         print(
-            f"[DRY-RUN] STATUS.md：将归档 {len(to_archive)} 段 → {rel_arch}，保留 {len(kept)} 段；"
+            f"[DRY-RUN] STATUS.md：将归档 {len(to_archive)} 段 → {rel_arch}，保留 {len(kept_indices)} 段；"
             f"体积 {before_bytes}B → {after_bytes}B。"
         )
         return status_eol
@@ -249,7 +296,7 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
     write_with_eol(status_path, new_status_lf, status_eol)
     warn_tail = "（注意：仍 >40KB，可调小 --keep）" if after_bytes > 40_000 else ""
     print(
-        f"STATUS.md：已归档 {len(to_archive)} 段 → {rel_arch}，保留 {len(kept)} 段；"
+        f"STATUS.md：已归档 {len(to_archive)} 段 → {rel_arch}，保留 {len(kept_indices)} 段；"
         f"体积 {before_bytes}B → {after_bytes}B{warn_tail}。"
     )
     return status_eol

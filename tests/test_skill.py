@@ -1087,8 +1087,12 @@ def test_041_d2_no_assets_pycache() -> None:
     # Spawn a subprocess WITHOUT -B or PYTHONDONTWRITEBYTECODE to invoke both scripts' --help
     env_no_b = {k: v for k, v in os.environ.items() if k != "PYTHONDONTWRITEBYTECODE"}
     env_no_b["PYTHONIOENCODING"] = "utf-8"
+    env_no_b["PYTHONUTF8"] = "1"
     for script in (CHECKER, ARCHIVER):
-        res = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True, env=env_no_b)
+        res = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env_no_b,
+        )
         check(res.returncode == 0, f"{script.name} --help failed")
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist after running tests/scripts")
@@ -1109,6 +1113,300 @@ def test_041_d3_versions_and_changelog() -> None:
 
     changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
     check(bool(re.search(r"(?m)^##\s+0\.4\.1\b", changelog)), "CHANGELOG.md must have a ## 0.4.1 section")
+
+
+def test_041_r1_mixed_heading_levels_and_archive() -> None:
+    """R1: Both ## and ### handoff headings form independent segments; latest handoff date spans all; archiver preserves count & order."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        # §3 is 2026-09-15; STATUS has ## Handoff (09-05) with ### inner headings, then ### 交接 (09-15)
+        mixed_status = (
+            "# STATUS\n\n"
+            "## Handoff（2026-09-05，旧段）\n"
+            "### 改了什么\n完成初版。\n### 怎么验证的\n脚本通过。\n### 没做什么\n无。\n### 不确定处\n无。\n\n"
+            "## 附录记录\n\n"
+            "### 交接（2026-09-15，新段三级标题）\n"
+            "- **谁做的**：执行方\n- **改了什么**：完成返修。\n- **怎么验证的**：测试全过。\n- **没做什么**：无。\n- **不确定处**：无。\n"
+        )
+        write(line / "STATUS.md", mixed_status)
+        blocks = checker_mod.handoff_blocks(mixed_status)
+        _, arch_blocks, _ = archiver_mod.parse_status(mixed_status)
+        check(len(blocks) == 2, f"checker must split ## and ### handoff into 2 blocks, got {len(blocks)}")
+        check(len(arch_blocks) == 2, f"archiver must split ## and ### handoff into 2 blocks, got {len(arch_blocks)}")
+        rc, out = run(line)
+        check(rc == 0 and "[H003] ✅" in out and "[H006] ✅" in out and "[A011] ✅" in out,
+              "mixed ## and ### handoff headings must use latest date 2026-09-15 and pass H003/H006/A011:\n" + out)
+
+        # Reverse mixed order: ### (09-05) followed by ## (09-15), 12 total blocks -> archive keeps 10, archives 2, preserves order
+        segs = []
+        for day in range(4, 16):
+            hashes = "##" if day % 2 == 0 else "###"
+            d_str = f"2026-09-{day:02d}"
+            if day in (6, 10, 14):
+                segs.append(
+                    f"{hashes} Handoff（{d_str}，第{day}段）\n"
+                    f"### 改了什么\n改{day}。\n### 怎么验证的\n验{day}。\n### 没做什么\n无。\n### 不确定处\n无。"
+                )
+            else:
+                segs.append(
+                    f"{hashes} 交接（{d_str}，第{day}段）\n"
+                    f"- **改了什么**：改{day}。\n- **怎么验证的**：验{day}。\n- **没做什么**：无。\n- **不确定处**：无。"
+                )
+        status_12 = "# STATUS.md\n\n## 现状一屏（2026-09-15 更新）\n> **阶段**：测试\n\n" + "\n\n".join(segs) + "\n"
+        write(line / "STATUS.md", status_12)
+        check(len(checker_mod.handoff_blocks(status_12)) == 12, "12 mixed blocks before archive")
+        check(len(archiver_mod.parse_status(status_12)[1]) == 12, "archiver must see 12 mixed blocks")
+
+        arc_rc, arc_out, _ = run_archiver(line, "--keep", "10")
+        check(arc_rc == 0 and "已归档 2 段" in arc_out and "保留 10 段" in arc_out, "archiver output mismatch:\n" + arc_out)
+        after_status = (line / "STATUS.md").read_text(encoding="utf-8")
+        arch_file = line / "文档" / "STATUS_归档_至2026-09-05.md"
+        check(arch_file.is_file(), "archived file up to 2026-09-05 must exist")
+        kept_b = checker_mod.handoff_blocks(after_status)
+        arch_b = checker_mod.handoff_blocks(arch_file.read_text(encoding="utf-8"))
+        check(len(kept_b) == 10 and len(arch_b) == 2, f"segment count must be conserved (10+2), got {len(kept_b)}+{len(arch_b)}")
+        check("2026-09-04" in arch_b[0] and "2026-09-05" in arch_b[1], "archived blocks order must be preserved")
+        check("2026-09-06" in kept_b[0] and "2026-09-15" in kept_b[-1], "kept blocks order must be preserved")
+
+
+def test_041_r2_card_state_ignores_fenced_blocks() -> None:
+    """R2: single_card_state strips fenced code blocks inside 进度回写 before matching 状态 line."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        cards_dir = line / "文档" / "任务卡"
+        write(cards_dir / "T1_初稿.md", "# T1\n\n## 进度回写\n- 状态：✅已收口\n")
+
+        # Case 1: fenced ✅ example BEFORE real ⬜可派 -> must read ⬜ (unticked T2 on §4 passes A007)
+        write(
+            cards_dir / "T2_方法.md",
+            "# T2 方法\n\n## 进度回写\n"
+            "```markdown\n- 状态：✅已收口\n```\n"
+            "- 状态：⬜可派\n\n"
+            "## 📋 执行方派发提示词\n做\n\n## 📋 独立复核方派发提示词\n核\n",
+        )
+        rc, out = run(line)
+        check(rc == 0 and "[A007] ✅" in out, "fenced ✅ before real ⬜ must not cause A007 false alarm:\n" + out)
+
+        # Case 2: ~~~ fenced ⬜ example BEFORE real ✅已收口 on a >16KB closed card without prompts -> must read ✅
+        agents_closed = (line / "AGENTS.md").read_text(encoding="utf-8").replace("- [ ] T2 方法", "- [x] T2 方法")
+        write(line / "AGENTS.md", agents_closed)
+        write(
+            cards_dir / "T2_方法.md",
+            "# T2 方法\n\n## 进度回写\n"
+            "~~~text\n- 状态：⬜可派\n~~~\n"
+            "- 状态：✅已收口\n\n## 历史内容\n" + ("甲" * 6000) + "\n",
+        )
+        rc2, out2 = run(line)
+        check(
+            rc2 == 0 and "[A005] ✅" in out2 and "[A006] ✅" in out2 and "[A007] ✅" in out2,
+            "fenced ⬜ before real ✅ must treat card as closed across A005/A006/A007:\n" + out2,
+        )
+
+
+def test_041_r3_non_hyphen_handoff_dates_and_clear_h005_h006() -> None:
+    """R3: 2026/11/11, 2026.11.11, 2026年11月11日 recognized in handoffs; H005/H006 explain exact failure reason."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        for heading in (
+            "## 交接（2026/09/15）",
+            "## Handoff（2026.09.15）",
+            "## 交接（2026年9月15日）",
+            "## 2026/9/15 主控补记",
+            "## T2（2026.9.15）",
+        ):
+            write(
+                line / "STATUS.md",
+                f"# STATUS\n\n{heading}\n"
+                "- **谁做的**：执行方\n- **改了什么**：完成修改。\n- **怎么验证的**：脚本通过。\n- **没做什么**：无。\n- **不确定处**：无。\n",
+            )
+            rc, out = run(line)
+            check(rc == 0 and "[H005] ✅" in out and "[H006] ✅" in out,
+                  f"non-hyphen handoff heading '{heading}' must pass H005 & H006:\n{out}")
+
+        # H005 & H006 clear messages when handoff has no date / future date / invalid date
+        write(
+            line / "STATUS.md",
+            "# STATUS\n\n## 交接（待补日期）\n"
+            "- **谁做的**：执行方\n- **改了什么**：写了超过五十个字的真实正文但忘了写日期，检查器应当说清原因。\n",
+        )
+        rc_nodate, out_nodate = run(line)
+        check(
+            rc_nodate == 1 and "未找到真实日期" in out_nodate and "STATUS None" not in out_nodate and "无有效日期" in out_nodate,
+            "missing date in handoff must explain clearly in H005 and H006 without 'STATUS None':\n" + out_nodate,
+        )
+
+        write(
+            line / "STATUS.md",
+            "# STATUS\n\n## 交接（2099/01/01）\n"
+            "- **谁做的**：执行方\n- **改了什么**：写了未来日期的正文超过五十个字，检查器应当指出是未来日期。\n",
+        )
+        rc_fut, out_fut = run(line)
+        check(
+            rc_fut == 1 and "未来日期" in out_fut and "晚于 today" in out_fut,
+            "future date must explicitly report future date in H005 and H006:\n" + out_fut,
+        )
+
+
+def test_041_r4_sec3_placeholder_dates_ignored() -> None:
+    """R4: Example dates on 【待填】 lines in §3 are excluded from H003/H006/H009; all-placeholder §3 says '§3 还是模板占位'."""
+    with tempfile.TemporaryDirectory() as temp:
+        proj = Path(temp)
+        raw_agents = (REPO / "assets" / "AGENTS.md").read_text(encoding="utf-8")
+        # Fill TL;DR and §4, leave §3 untouched (contains '【待填：...例 2026-06-15...】')
+        semi_agents = (
+            raw_agents
+            .replace("【待填：例 T3 进行中】", "T1 进行中（2026-09-14）")
+            .replace("【待填：第一个动作，精确到文件/命令】", "跑 python scripts/check_handoff.py")
+            .replace("【待填：无 / 等用户确认 X / 等数据下载】", "无")
+            .replace("- [ ] **Tx【待填：例 数据清洗（建真实卡后替换示例行）】**", "- [ ] **T1 数据清洗**")
+        )
+        write(proj / "AGENTS.md", semi_agents)
+        write(proj / "CLAUDE.md", (REPO / "assets" / "CLAUDE.md").read_text(encoding="utf-8"))
+        write(
+            proj / "STATUS.md",
+            "# STATUS\n\n## Handoff（2026-09-15）\n"
+            "- **谁做的**：执行方\n- **改了什么**：初始化。\n- **怎么验证的**：脚本。\n- **没做什么**：无。\n- **不确定处**：无。\n",
+        )
+        rc, out = run(proj)
+        check(rc == 1 and "[H003] ❌" in out and "[H006] ❌" in out and "[H009] ✅" in out,
+              "unfilled §3 must fail H003/H006 and not falsely fail H009:\n" + out)
+        check("2026-06-15" not in out, "template example date 2026-06-15 in §3 must never leak into output:\n" + out)
+        check("§3 还是模板占位" in out, "all-placeholder §3 must state '§3 还是模板占位':\n" + out)
+
+        # Partially filled §3: real line has 2026-09-14, leftover 【待填】 line has newer date 2026-09-15 -> must use 2026-09-14
+        partial_agents = semi_agents.replace(
+            "- ✅ 【待填：另一件完成的事】",
+            "- ✅ 2026-09-14：完成数据盘点\n- ✅ 【待填：例 2026-09-15：待补充示例】",
+        )
+        write(proj / "AGENTS.md", partial_agents)
+        rc2, out2 = run(proj)
+        check(rc2 == 0 and "§3 2026-09-14" in out2,
+              "real §3 date 2026-09-14 must be used while ignoring date on leftover 【待填】 line:\n" + out2)
+
+
+def test_041_s1_relaxed_state_line_and_unparsed_warning() -> None:
+    """S1: Card state line allows space before colon and omitted list marker; unparseable card is named in A007."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        agents_all_done = (line / "AGENTS.md").read_text(encoding="utf-8").replace("- [ ] T2 方法", "- [x] T2 方法")
+        write(line / "AGENTS.md", agents_all_done)
+        cards_dir = line / "文档" / "任务卡"
+        write(cards_dir / "T1_初稿.md", "# T1\n\n## 进度回写\n状态：✅已收口\n")
+        write(cards_dir / "T2_方法.md", "# T2\n\n## 进度回写\n- 状态 : ✅已收口\n")
+        rc, out = run(line)
+        check(
+            rc == 0 and "[A005] ✅" in out and "[A007] ✅" in out,
+            "state lines without bullet ('状态：✅') or with space ('- 状态 : ✅') must parse as closed:\n" + out,
+        )
+
+        # Unparseable state line -> A007 names the card explicitly
+        write(
+            cards_dir / "T2_方法.md",
+            "# T2\n\n## 进度回写\n- 状态：已完成但没写图标\n\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n",
+        )
+        rc2, out2 = run(line)
+        check(
+            rc2 == 0 and "[A007] ⚠️" in out2 and "状态行无法解析：T2_方法.md" in out2,
+            "card with unparseable state line must be named in A007 warning:\n" + out2,
+        )
+
+
+def test_041_s3_decision_id_normalization() -> None:
+    """S3: Decision IDs like D38 and D-38 (or D05 and D-05) are normalized before chain/duplicate checks."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        agents_base = (line / "AGENTS.md").read_text(encoding="utf-8")
+        bad_norm_table = (
+            "## 3.5 决策登记表\n"
+            "| ID | 状态 | 决策 | 取值/口径 | 理由 | 日期 | 证据文档 | 取代了谁 | 被谁取代 |\n"
+            "|---|---|---|---|---|---|---|---|---|\n"
+            "| D-38 | ACTIVE | 水口径 | 产水 | 旧 | 2026-09-10 | 方案 | -- | -- |\n"
+            "| D-51 | ACTIVE | 水源涵养 | 平衡法 | 新 | 2026-09-12 | T4c | D38 | -- |\n"
+        )
+        write(line / "AGENTS.md", agents_base.replace("## 3.5 决策登记表\n| ID | 决策 |\n|---|---|\n", bad_norm_table))
+        rc, out = run(line)
+        check(
+            rc == 0 and "[A013] ⚠️" in out and "D-51／D-38" in out,
+            "D38 without hyphen referencing D-38 ACTIVE in table must trigger A013:\n" + out,
+        )
+
+        good_norm_table = bad_norm_table.replace(
+            "| D-38 | ACTIVE | 水口径 | 产水 | 旧 | 2026-09-10 | 方案 | -- | -- |",
+            "| D-38 | SUPERSEDED | 水口径 | 产水 | 旧 | 2026-09-10 | 方案 | -- | D51 |",
+        )
+        write(line / "AGENTS.md", agents_base.replace("## 3.5 决策登记表\n| ID | 决策 |\n|---|---|\n", good_norm_table))
+        rc2, out2 = run(line)
+        check(rc2 == 0 and "[A013] ✅" in out2, "valid chain using D38/D51 shorthand must pass A013:\n" + out2)
+
+
+def test_041_s7_handoff_heading_words_and_docs() -> None:
+    """S7: Headings like '## 交回说明' are NOT treated as handoffs; docs state recognized handoff heading words."""
+    skill_md = (REPO / "SKILL.md").read_text(encoding="utf-8")
+    status_tpl = (REPO / "assets" / "STATUS.md").read_text(encoding="utf-8")
+    check("交回说明" in skill_md and "Handoff" in skill_md and "交接" in skill_md,
+          "SKILL.md must document recognized handoff heading words and note '交回说明' is excluded")
+    check("交回说明" in status_tpl, "assets/STATUS.md must note '交回说明' is not a handoff heading")
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        status_with_note = (
+            "# STATUS\n\n"
+            "## Handoff（2026-09-15）\n"
+            "- **谁做的**：执行方\n- **改了什么**：初稿。\n- **怎么验证的**：通过。\n- **没做什么**：无。\n- **不确定处**：无。\n\n"
+            "## 交回说明\n"
+            "这里只是一段补充说明，不是交接段，不含四节。\n"
+        )
+        write(line / "STATUS.md", status_with_note)
+        check(len(checker_mod.handoff_blocks(status_with_note)) == 1, "'## 交回说明' must not count as a handoff in checker")
+        check(len(archiver_mod.parse_status(status_with_note)[1]) == 1, "'## 交回说明' must not count as a handoff in archiver")
+        rc, out = run(line)
+        check(rc == 0 and "[A011] ✅" in out, "'## 交回说明' must not cause A011 missing-sections warning:\n" + out)
+
+
+def test_041_s8_subprocess_utf8_no_gbk_error() -> None:
+    """S8: All text-mode subprocess calls in test_skill.py explicitly set encoding='utf-8'; bare run emits no stderr decode error."""
+    import ast
+
+    src = (REPO / "tests" / "test_skill.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr in ("run", "Popen", "check_output"):
+                kw_map = {kw.arg: kw.value for kw in node.keywords if kw.arg}
+                is_text = any(
+                    k in kw_map and isinstance(kw_map[k], ast.Constant) and kw_map[k].value is True
+                    for k in ("text", "universal_newlines")
+                )
+                if is_text:
+                    enc_node = kw_map.get("encoding")
+                    check(
+                        isinstance(enc_node, ast.Constant) and str(enc_node.value).lower().replace("_", "-") == "utf-8",
+                        f"subprocess.{node.func.attr} at line {node.lineno} with text=True must pass encoding='utf-8'",
+                    )
+
+    bare_env = {k: v for k, v in os.environ.items() if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
+    probe = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-c",
+            f"import sys; sys.path.insert(0, {str(REPO / 'tests')!r}); import test_skill; test_skill.test_041_d2_no_assets_pycache()",
+        ],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", env=bare_env,
+    )
+    check(
+        probe.returncode == 0 and "UnicodeDecodeError" not in probe.stderr and "Traceback" not in probe.stderr,
+        f"bare subprocess run emitted stderr error:\n{probe.stderr}",
+    )
+
+
+def test_041_s10_index_template_a011_recent_five() -> None:
+    """S10: assets/任务卡_README.md describes A011 as checking the recent 5 handoff blocks ('最近 5 段')."""
+    readme_tpl = (REPO / "assets" / "任务卡_README.md").read_text(encoding="utf-8")
+    check(
+        "最近 5 段交接 ≤800 字" in readme_tpl and "最新交接段 ≤800 字" not in readme_tpl,
+        "assets/任务卡_README.md must state '最近 5 段交接 ≤800 字' for A011",
+    )
 
 
 def main() -> int:
@@ -1136,6 +1434,15 @@ def main() -> int:
     test_041_d1_github_actions_ci()
     test_041_d2_no_assets_pycache()
     test_041_d3_versions_and_changelog()
+    test_041_r1_mixed_heading_levels_and_archive()
+    test_041_r2_card_state_ignores_fenced_blocks()
+    test_041_r3_non_hyphen_handoff_dates_and_clear_h005_h006()
+    test_041_r4_sec3_placeholder_dates_ignored()
+    test_041_s1_relaxed_state_line_and_unparsed_warning()
+    test_041_s3_decision_id_normalization()
+    test_041_s7_handoff_heading_words_and_docs()
+    test_041_s8_subprocess_utf8_no_gbk_error()
+    test_041_s10_index_template_a011_recent_five()
 
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)

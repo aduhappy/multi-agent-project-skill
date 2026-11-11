@@ -16,7 +16,9 @@
         项目停工超 N 天不再失败；STATUS 没有交接时退回与今天比）
   H004 TL;DR 已填（不是模板占位符）
   H005 STATUS.md 存在、非模板、有真实日期（仅在标题、“现状”行、字段占位等模板位置判未填）
-  H006 STATUS 最新交接日期 >= §3 最近日期（交接标题＝含 Handoff/交接，或标题以日期开头）
+  H006 STATUS 最新交接日期 >= §3 最近日期
+       （交接标题支持 ## 或 ###，须含 Handoff/交接，或以日期 / T<卡号>+日期 开头；“交回说明”等不算交接；
+        日期支持 YYYY-MM-DD、YYYY/MM/DD、YYYY.MM.DD、YYYY年MM月DD日）
   H007 至少一个薄指针指向 AGENTS.md（没有薄指针也算通过）
   H008 §4 看板存在且有真实任务行（仅含模板占位行不算）
   H009 TL;DR 日期与 §3 不矛盾（任一方没日期则跳过）
@@ -62,9 +64,17 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 DATE_RE = re.compile(r"(?<!\d)(20\d{2}-\d{2}-\d{2})(?!\d)")
+FLEX_DATE_TOKEN_RE = re.compile(
+    r"(?<!\d)(20\d{2})(?:([-/.])(\d{1,2})\2(\d{1,2})(?![-/.]?\d)|\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日)"
+)
+HEADING_DATE_START_RE = re.compile(
+    r"^[\[（(【]?\s*20\d{2}(?:([-/.])\d{1,2}\1\d{1,2}(?![-/.]?\d)|\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日)"
+)
+DATE_PLACEHOLDER_RE = re.compile(r"YYYY[-/.]MM[-/.]DD|YYYY\s*年\s*MM\s*月\s*DD\s*日", re.I)
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 PROMPT_HEAD_RE = re.compile(r"(?m)^#{1,6}\s.*(?:📋|提示词).*$")
 STATE_RE = re.compile(r"🟠|⬜|⏳|🟡|🔵|✅|⛔|🗄")
+CARD_STATE_LINE_RE = re.compile(r"(?m)^\s*>?\s*(?:[-*+]\s+)?\**状态\**\s*[:：]\**(.*)$")
 CLOSED = ("✅", "🗄")
 PLACEHOLDER_RE = re.compile(
     r"【待填|【TODO|TODO】|\[TODO\b|<TODO\b|YYYY-MM-DD|<fill|\[fill|<待填|\[待填"
@@ -101,7 +111,9 @@ HANDOFF_SECTIONS = (
     ("没做什么", re.compile(r"(?m)^\s*>?\s*(?:[-*+]|\d+[.)]|#{2,6})?\s*[\*【\[]*没做什么")),
     ("不确定处", re.compile(r"(?m)^\s*>?\s*(?:[-*+]|\d+[.)]|#{2,6})?\s*[\*【\[]*不确定处")),
 )
-HANDOFF_INNER_HEAD_RE = re.compile(r"^[\*【\[]*(?:谁做的|改了什么|怎么验证|没做什么|不确定处)")
+HANDOFF_INNER_HEAD_RE = re.compile(
+    r"^(?:[-*+]|\d+[.、)])?\s*[\*【\[]*(?:谁做的|改了什么|怎么验证|没做什么|不确定处)"
+)
 DISPLAY_CONST_RE = re.compile(
     r"(?:^|_)(?:COLORS?|PALETTES?|CMAPS?|COLORMAPS?|STYLES?|FONTS?|MARKERS?|HATCH(?:ES)?|LINESTYLES?|ALPHAS?|SIZES?|WIDTHS?)$"
 )
@@ -160,16 +172,26 @@ def strip_fenced(text: str) -> str:
     return "\n".join(ln for i, ln in enumerate(lines) if i in keep)
 
 
-def dates(text: str, today: date) -> list[date]:
-    result = []
-    for token in DATE_RE.findall(text):
+def scan_dates(text: str) -> tuple[list[date], list[str]]:
+    """Return (valid_calendar_dates, invalid_date_tokens) supporting -, /, ., and 年月日."""
+    valid: list[date] = []
+    invalid: list[str] = []
+    for m in FLEX_DATE_TOKEN_RE.finditer(text):
+        year = int(m.group(1))
+        if m.group(3) is not None:
+            month, day = int(m.group(3)), int(m.group(4))
+        else:
+            month, day = int(m.group(5)), int(m.group(6))
         try:
-            value = datetime.strptime(token, "%Y-%m-%d").date()
+            valid.append(date(year, month, day))
         except ValueError:
-            continue
-        if value <= today:
-            result.append(value)
-    return result
+            invalid.append(m.group(0).strip())
+    return valid, invalid
+
+
+def dates(text: str, today: date) -> list[date]:
+    valid, _ = scan_dates(text)
+    return [d for d in valid if d <= today]
 
 
 def latest(text: str, today: date) -> Optional[date]:
@@ -200,13 +222,15 @@ def pointer_ok(text: str) -> bool:
 
 
 def is_handoff_heading(title: str) -> bool:
+    """Recognized handoff headings: contain Handoff/交接, start with date, or start with T<id> + date.
+    Headings like '## 交回说明' or '## 归档说明' are NOT handoff headings."""
     t = title.strip()
     if re.search(r"归档|archive|现状一屏|current\s+snapshot", t, re.I):
         return False
     return bool(
-        re.search(r"(?i)handoff|交接|交回", t)
-        or re.match(r"^[\[（(【]?\s*\d{4}[-/.]\d{2}[-/.]\d{2}", t)
-        or (re.match(r"^[\[（(【]?\s*T\d+[A-Za-z0-9-]*\b", t, re.I) and DATE_RE.search(t))
+        re.search(r"(?i)handoff|交接", t)
+        or HEADING_DATE_START_RE.match(t)
+        or (re.match(r"^[\[（(【]?\s*T\d+[A-Za-z0-9-]*\b", t, re.I) and FLEX_DATE_TOKEN_RE.search(t))
     )
 
 
@@ -221,26 +245,30 @@ def handoff_blocks(status: str) -> list[str]:
 
     handoffs = [
         (i, lvl, t) for i, lvl, t in headings
-        if lvl >= 2 and is_handoff_heading(t) and not HANDOFF_INNER_HEAD_RE.match(t)
+        if lvl in (2, 3) and is_handoff_heading(t) and not HANDOFF_INNER_HEAD_RE.match(t)
     ]
     if not handoffs:
         return []
 
-    top_lvl = min(lvl for _, lvl, _ in handoffs)
-    starts = [i for i, lvl, _ in handoffs if lvl == top_lvl]
+    handoff_starts = {i for i, _, _ in handoffs}
     blocks: list[str] = []
-    for idx, start in enumerate(starts):
+    for idx, (start, cur_lvl, _) in enumerate(handoffs):
         end = next(
             (
                 i for i, lvl, t in headings
-                if i > start and (lvl < top_lvl or (lvl == top_lvl and not HANDOFF_INNER_HEAD_RE.match(t)))
+                if i > start
+                and (
+                    i in handoff_starts
+                    or lvl < cur_lvl
+                    or (lvl == cur_lvl and not HANDOFF_INNER_HEAD_RE.match(t))
+                )
             ),
             len(lines),
         )
         seg = lines[start:end]
         while seg and not seg[-1].strip():
             seg.pop()
-        if idx == len(starts) - 1:
+        if idx == len(handoffs) - 1:
             while seg and re.match(r"^>\s*⚠️", seg[-1].strip()):
                 seg.pop()
                 while seg and not seg[-1].strip():
@@ -272,14 +300,24 @@ def check_status_h005(status: str, today: date) -> tuple[bool, str]:
     reasons: list[str] = []
     if len(status.strip()) <= 50:
         reasons.append(f"内容过短（{len(status.strip())} 字，需 >50 字）")
-    if not dates(unfenced_text, today):
-        reasons.append("缺少有效真实日期（≤ today）")
+
+    all_valid, invalid_tokens = scan_dates(unfenced_text)
+    le_today = [d for d in all_valid if d <= today]
+    future_dates = [d for d in all_valid if d > today]
+    if not le_today:
+        if future_dates:
+            reasons.append(f"缺少不晚于 today（{today}）的真实日期（仅检测到未来日期 {future_dates[0]}）")
+        elif invalid_tokens:
+            reasons.append(f"缺少有效真实日期（检测到非法日历日期「{invalid_tokens[0]}」）")
+        else:
+            reasons.append("未找到真实日期（支持 YYYY-MM-DD、YYYY/MM/DD、YYYY.MM.DD、YYYY年MM月DD日）")
 
     for ln in unfenced_lines:
         hm = re.match(r"^\s*(#{2,6})\s+(.*)$", ln)
         if hm:
             no_code = re.sub(r"`[^`]*`", "", hm.group(2)).strip()
-            if "YYYY-MM-DD" in no_code and not DATE_RE.search(no_code):
+            has_real_date = bool(scan_dates(no_code)[0])
+            if DATE_PLACEHOLDER_RE.search(no_code) and not has_real_date:
                 reasons.append(f"标题仍含日期占位符「{hm.group(2).strip()[:28]}」")
             elif STATUS_FIELD_PLACEHOLDER_RE.search(no_code):
                 reasons.append(f"标题仍含模板占位符「{hm.group(2).strip()[:28]}」")
@@ -291,11 +329,11 @@ def check_status_h005(status: str, today: date) -> tuple[bool, str]:
         )
         if snap_m:
             val = re.sub(r"`[^`]*`", "", snap_m.group(2)).strip()
-            if not val or "YYYY-MM-DD" in val or STATUS_FIELD_PLACEHOLDER_RE.search(val):
+            if not val or DATE_PLACEHOLDER_RE.search(val) or STATUS_FIELD_PLACEHOLDER_RE.search(val):
                 reasons.append(f"“现状”行「{snap_m.group(1)}」仍为占位符或未填")
             continue
 
-        if re.match(r"^\s*[-*+]\s*(?:【待填[^】]*】|\[TODO\]|<TODO>|YYYY-MM-DD)\s*$", ln, re.I):
+        if re.match(r"^\s*[-*+]\s*(?:【待填[^】]*】|\[TODO\]|<TODO>|YYYY[-/.]MM[-/.]DD)\s*$", ln, re.I):
             reasons.append("交接条目仍为未填模板占位符")
             continue
 
@@ -305,7 +343,7 @@ def check_status_h005(status: str, today: date) -> tuple[bool, str]:
         )
         if fld_m:
             raw_val = re.sub(r"`[^`]*`", "", fld_m.group(2)).strip()
-            if raw_val.upper() == "YYYY-MM-DD" or STATUS_FIELD_PLACEHOLDER_RE.search(raw_val):
+            if DATE_PLACEHOLDER_RE.fullmatch(raw_val) or STATUS_FIELD_PLACEHOLDER_RE.search(raw_val):
                 reasons.append(f"交接字段「{fld_m.group(1)}」仍含模板占位符")
 
     if not reasons:
@@ -475,54 +513,60 @@ def check_decision_chain_a013(agents: str) -> tuple[bool, str]:
         raw_rep = _get_tail_col(rep_col)
         raw_rep_by = _get_tail_col(rep_by_col)
 
+        def _norm_id(tok: str) -> str:
+            m = re.match(r"^([A-Za-z]+)-?0*(\d+)([A-Za-z0-9]*)$", tok.strip())
+            if not m:
+                return tok.strip().upper()
+            return f"{m.group(1).upper()}-{int(m.group(2))}{m.group(3).upper()}"
+
         def _parse_ids(val: str) -> list[str]:
             v = val.strip(" *`")
             if v.lower() in EMPTY_CELL_VALUES or PLACEHOLDER_RE.search(v):
                 return []
-            return DECISION_ID_RE.findall(v)
+            return [_norm_id(t) for t in DECISION_ID_RE.findall(v)]
 
-        rows.append((raw_id, raw_st, raw_rep, raw_rep_by, _parse_ids(raw_rep), _parse_ids(raw_rep_by)))
+        rows.append((raw_id, _norm_id(raw_id), raw_st, raw_rep, raw_rep_by, _parse_ids(raw_rep), _parse_ids(raw_rep_by)))
 
     if not rows:
         return True, "0 条已登记决策"
 
     issues: list[str] = []
     seen_ids: dict[str, int] = {}
-    by_id: dict[str, tuple[str, str, str, list[str], list[str]]] = {}
-    for cid, st, raw_rep, raw_rep_by, rep_ids, rep_by_ids in rows:
-        seen_ids[cid] = seen_ids.get(cid, 0) + 1
-        if seen_ids[cid] == 2:
-            issues.append(f"重复 ID：{cid}")
-        by_id.setdefault(cid, (st, raw_rep, raw_rep_by, rep_ids, rep_by_ids))
+    by_id: dict[str, tuple[str, str, str, str, list[str], list[str]]] = {}
+    for disp_id, norm_cid, st, raw_rep, raw_rep_by, rep_ids, rep_by_ids in rows:
+        seen_ids[norm_cid] = seen_ids.get(norm_cid, 0) + 1
+        if seen_ids[norm_cid] == 2:
+            issues.append(f"重复 ID：{disp_id}")
+        by_id.setdefault(norm_cid, (disp_id, st, raw_rep, raw_rep_by, rep_ids, rep_by_ids))
 
     if st_col is not None and rep_by_col is not None:
         reported_pairs: set[tuple[str, str]] = set()
-        for cid, st, raw_rep, raw_rep_by, rep_ids, rep_by_ids in rows:
+        for disp_id, norm_cid, st, raw_rep, raw_rep_by, rep_ids, rep_by_ids in rows:
             is_rep_by_empty = raw_rep_by.strip(" *`").lower() in EMPTY_CELL_VALUES
             if st == "SUPERSEDED" and not rep_by_ids:
-                issues.append(f"{cid} 为 SUPERSEDED 但未填“被谁取代”")
+                issues.append(f"{disp_id} 为 SUPERSEDED 但未填“被谁取代”")
             elif st == "ACTIVE" and not is_rep_by_empty:
-                issues.append(f"{cid} 为 ACTIVE 但填了“被谁取代”（{raw_rep_by}）")
+                issues.append(f"{disp_id} 为 ACTIVE 但填了“被谁取代”（{raw_rep_by}）")
 
             if rep_col is not None:
                 for target in rep_ids:
                     if target not in by_id:
                         continue  # 乙不在表内（已迁出）不报
-                    t_st, _, t_raw_rep_by, _, t_rep_by_ids = by_id[target]
-                    if t_st != "SUPERSEDED" or cid not in t_rep_by_ids:
-                        reported_pairs.add((cid, target))
+                    t_disp, t_st, _, t_raw_rep_by, _, t_rep_by_ids = by_id[target]
+                    if t_st != "SUPERSEDED" or norm_cid not in t_rep_by_ids:
+                        reported_pairs.add((norm_cid, target))
                         issues.append(
-                            f"{cid}／{target}（{cid} 写取代 {target}，但 {target} 状态={t_st or '空'}、被谁取代={t_raw_rep_by or '空'}）"
+                            f"{disp_id}／{t_disp}（{disp_id} 写取代 {t_disp}，但 {t_disp} 状态={t_st or '空'}、被谁取代={t_raw_rep_by or '空'}）"
                         )
                 if st == "SUPERSEDED":
                     for newer in rep_by_ids:
-                        if newer not in by_id or (newer, cid) in reported_pairs:
+                        if newer not in by_id or (newer, norm_cid) in reported_pairs:
                             continue
-                        _, n_raw_rep, _, n_rep_ids, _ = by_id[newer]
-                        if cid not in n_rep_ids:
-                            reported_pairs.add((newer, cid))
+                        n_disp, _, n_raw_rep, _, n_rep_ids, _ = by_id[newer]
+                        if norm_cid not in n_rep_ids:
+                            reported_pairs.add((newer, norm_cid))
                             issues.append(
-                                f"{newer}／{cid}（{cid} 写被 {newer} 取代，但 {newer} 取代了谁={n_raw_rep or '空'}）"
+                                f"{n_disp}／{disp_id}（{disp_id} 写被 {n_disp} 取代，但 {n_disp} 取代了谁={n_raw_rep or '空'}）"
                             )
 
     if issues:
@@ -595,7 +639,16 @@ def line_checks(root: Path, days: int, today: date) -> None:
     declared_index = bool(re.search(r"(?m)^>\s*\*\*Scope[:：]\s*index\*\*", agents))
     add("H002", "线级入口未声明为根索引", not declared_index, "请改用 --scope index" if declared_index else "line scope")
 
-    sec3_date = latest(strip_fenced(section(agents, "3", {"现在在哪", "Where We Are Now"})), today)
+    sec3_unfenced = strip_fenced(section(agents, "3", {"现在在哪", "Where We Are Now"}))
+    sec3_body_lines = sec3_unfenced.splitlines()[1:] if sec3_unfenced else []
+    sec3_has_placeholder = any("【待填" in ln or PLACEHOLDER_RE.search(ln) for ln in sec3_body_lines)
+    sec3_real_text = "\n".join(
+        ln for ln in sec3_body_lines if not ("【待填" in ln or PLACEHOLDER_RE.search(ln))
+    )
+    sec3_date = latest(sec3_real_text, today)
+    sec3_is_placeholder = sec3_date is None and sec3_has_placeholder
+    sec3_missing_msg = "§3 还是模板占位" if sec3_is_placeholder else "§3 没有有效日期"
+
     blocks = handoff_blocks(status)
     if blocks:
         head_lines = "\n".join(b.splitlines()[0] for b in blocks if b.splitlines())
@@ -605,13 +658,13 @@ def line_checks(root: Path, days: int, today: date) -> None:
 
     if handoff_date is not None:
         h003_ok = bool(sec3_date and sec3_date >= handoff_date - timedelta(days=days))
-        h003_detail = f"§3 {sec3_date} vs STATUS 最新交接 {handoff_date}" if sec3_date else "§3 没有有效日期"
+        h003_detail = f"§3 {sec3_date} vs STATUS 最新交接 {handoff_date}" if sec3_date else sec3_missing_msg
     else:
         h003_ok = bool(sec3_date and sec3_date >= today - timedelta(days=days))
         h003_detail = (
             f"§3 {sec3_date} vs today {today}（STATUS 无交接，退回与今天比）"
             if sec3_date
-            else "§3 没有有效日期"
+            else sec3_missing_msg
         )
     add("H003", f"§3 日期未落后最新交接超 {days} 天", h003_ok, h003_detail)
 
@@ -624,15 +677,37 @@ def line_checks(root: Path, days: int, today: date) -> None:
     h005_ok, h005_detail = check_status_h005(status, today)
     add("H005", "STATUS.md 存在且非模板", h005_ok, h005_detail)
 
-    # 交接标题：含 Handoff/交接（非归档说明），或标题以日期开头
+    # 交接标题：## 或 ###，含 Handoff/交接，或以日期 / T<卡号>+日期 开头（“交回说明”“归档说明”等不算）
     status_unfenced = strip_fenced(status)
     non_arch_lines = "\n".join(
         ln for ln in status_unfenced.splitlines()
         if not (re.match(r"^\s*#{1,6}\s+", ln) and re.search(r"归档|archive", ln, re.I))
     )
     status_date = handoff_date or latest(non_arch_lines, today)
-    add("H006", "STATUS 最新交接日期 >= §3 日期", bool(status_date and sec3_date and status_date >= sec3_date),
-        f"STATUS {status_date} vs §3 {sec3_date}")
+    h006_ok = bool(status_date and sec3_date and status_date >= sec3_date)
+    if h006_ok:
+        h006_detail = f"STATUS {status_date} vs §3 {sec3_date}"
+    else:
+        st_valid, st_invalid = scan_dates(non_arch_lines)
+        st_future = [d for d in st_valid if d > today]
+        if status_date is None and sec3_date is None:
+            h006_detail = f"STATUS 未读出有效交接日期，且 {sec3_missing_msg}"
+        elif status_date is None:
+            if not status.strip():
+                h006_detail = f"STATUS.md 不存在或为空（vs §3 {sec3_date}）"
+            elif st_future:
+                h006_detail = f"STATUS 日期晚于 today（{st_future[0]} > {today}，vs §3 {sec3_date}）"
+            elif st_invalid:
+                h006_detail = f"STATUS 含非法日历日期「{st_invalid[0]}」（vs §3 {sec3_date}）"
+            elif blocks:
+                h006_detail = f"STATUS 已识别 {len(blocks)} 段交接但无有效日期（vs §3 {sec3_date}）"
+            else:
+                h006_detail = f"STATUS 未找到交接段或有效日期（vs §3 {sec3_date}）"
+        elif sec3_date is None:
+            h006_detail = f"{sec3_missing_msg}（STATUS 最新交接 {status_date}）"
+        else:
+            h006_detail = f"STATUS 最新交接日期落后于 §3（STATUS {status_date} < §3 {sec3_date}）"
+    add("H006", "STATUS 最新交接日期 >= §3 日期", h006_ok, h006_detail)
 
     pointers = [root / n for n in ("CLAUDE.md", "GEMINI.md", ".cursorrules", ".github/copilot-instructions.md")]
     if (root / ".cursor" / "rules").is_dir():
@@ -653,9 +728,13 @@ def line_checks(root: Path, days: int, today: date) -> None:
     )
     add("H008", "§4 看板存在且有任务行", bool(real_box_lines), h008_detail)
 
-    tldr_date = latest(strip_fenced(tldr), today)
+    tldr_real_lines = "\n".join(
+        ln for ln in strip_fenced(tldr).splitlines() if not ("【待填" in ln or PLACEHOLDER_RE.search(ln))
+    )
+    tldr_date = latest(tldr_real_lines, today)
     conflict = bool(tldr_date and sec3_date and tldr_date < sec3_date - timedelta(days=1))
-    add("H009", "TL;DR 日期与 §3 不矛盾", not conflict, f"TL;DR {tldr_date} vs §3 {sec3_date}")
+    h009_rhs = f"§3 {sec3_date}" if sec3_date else (sec3_missing_msg if sec3_is_placeholder else "§3 None")
+    add("H009", "TL;DR 日期与 §3 不矛盾", not conflict, f"TL;DR {tldr_date} vs {h009_rhs}")
 
     advisories(root, agents, status, sec4, blocks, today)
 
@@ -727,21 +806,33 @@ def advisories(root: Path, agents: str, status: str, sec4: str, blocks: list[str
     cards_dir_exists = cards_dir.is_dir()
     cards = sorted(cards_dir.glob("*.md")) if cards_dir_exists else []
     active_cards: list[tuple[Path, str]] = []
+    unparsed_cards: list[str] = []
     lacking: list[str] = []
     for fp in cards:
         text = read(fp)
-        if single_card_state(text) in CLOSED:
+        st_mark = single_card_state(text)
+        if st_mark is None:
+            unparsed_cards.append(fp.name)
+        elif st_mark in CLOSED:
             continue
         active_cards.append((fp, text))
         heads = PROMPT_HEAD_RE.findall(strip_fenced(text))
         if not (any("执行" in h for h in heads) and any("复核" in h for h in heads)):
             lacking.append(fp.name)
     closed_cnt = len(cards) - len(active_cards)
-    skip_note = f"{len(active_cards)} 张在用卡（跳过 {closed_cnt} 张收口/作废）" if closed_cnt else (
-        f"{len(active_cards)} 张卡" if cards else "无任务卡（未检查）"
+    unparsed_note = (
+        f"（其中状态行无法解析、暂按在用卡检查：{'、'.join(unparsed_cards[:5])}）"
+        if unparsed_cards
+        else ""
+    )
+    skip_note = (
+        f"{len(active_cards)} 张在用卡（跳过 {closed_cnt} 张收口/作废）{unparsed_note}"
+        if closed_cnt
+        else (f"{len(active_cards)} 张卡{unparsed_note}" if cards else "无任务卡（未检查）")
     )
     add("A005", "任务卡同时带执行方和独立复核方提示词", not lacking,
         (f"{len(lacking)} 张缺：" + "、".join(lacking[:5]) + ("…" if len(lacking) > 5 else "")
+         + unparsed_note
          + "；一个任务一张卡，复核写在同一张卡里（已收口 ✅ 与作废 🗄️ 卡不查）") if lacking else skip_note, True)
 
     bloated = []
@@ -753,7 +844,7 @@ def advisories(root: Path, agents: str, status: str, sec4: str, blocks: list[str
         elif prompts > 3:
             bloated.append(f"{fp.name}（{size // 1000}KB，{prompts} 段提示词）")
     add("A006", "任务卡 ≤15KB、提示词段 ≤3", not bloated,
-        (f"{len(bloated)} 张在用卡超限（跳过 {closed_cnt} 张收口/作废）：" + "；".join(bloated[:6])
+        (f"{len(bloated)} 张在用卡超限（跳过 {closed_cnt} 张收口/作废）{unparsed_note}：" + "；".join(bloated[:6])
          + ("…" if len(bloated) > 6 else "")
          + "；超限部分该挪到 STATUS 或开新卡，就地改并删用过的提示词（见 任务卡_README.md 卡面规矩）")
         if bloated else skip_note, True)
@@ -768,9 +859,16 @@ def advisories(root: Path, agents: str, status: str, sec4: str, blocks: list[str
             if (cells[0] == cid or name in row) and mark and (mark.group(0) in CLOSED) != (state in CLOSED):
                 drift.append(f"{cid} 卡面 {state}／索引 {mark.group(0)}")
     drift.extend(sec4_card_drifts(sec4, states))
-    add("A007", "卡面状态与 §4 看板、任务卡索引一致（只比收口与否）", not drift,
-        ("；".join(drift[:6]) + ("…" if len(drift) > 6 else "") + "；对不上以卡面为准，主控收口时同步 §4 与索引")
-        if drift else (f"{len(states)} 张卡有“进度回写”" if cards else "无任务卡（未检查）"), True)
+    a007_issues: list[str] = []
+    if unparsed_cards:
+        a007_issues.append(
+            "状态行无法解析：" + "、".join(unparsed_cards[:5]) + ("…" if len(unparsed_cards) > 5 else "")
+        )
+    if drift:
+        a007_issues.append("；".join(drift[:6]) + ("…" if len(drift) > 6 else ""))
+    add("A007", "卡面状态与 §4 看板、任务卡索引一致（只比收口与否）", not a007_issues,
+        ("；".join(a007_issues) + "；对不上以卡面为准，主控收口时同步 §4 与索引")
+        if a007_issues else (f"{len(states)} 张卡有“进度回写”" if cards else "无任务卡（未检查）"), True)
 
     items = [ln for ln in sec3.splitlines() if re.match(r"^[-*]\s+(?!`?→)", ln)]
     stale = sorted({cid for ln in sec3.splitlines() if re.search(r"待审查|待复核|待收口|已交回|🟡|🔵", ln)
@@ -781,13 +879,13 @@ def advisories(root: Path, agents: str, status: str, sec4: str, blocks: list[str
 
     long_rows = []
     for fp, text in active_cards:
-        head = re.search(r"(?m)^##\s*进度回写.*$", text)
-        body = text[head.end():].split("\n## ", 1)[0] if head else ""
+        body = progress_section_unfenced(text)
         long_rows += [f"{fp.name}「{re.split('[:：]', ln.strip().lstrip('-* '))[0][:12]}」行 {len(ln.strip())} 字"
                       for ln in body.splitlines() if re.match(r"^\s*[-*]\s", ln) and len(ln.strip()) > 400]
     add("A009", "“进度回写”每行 ≤400 字", not long_rows,
         ("；".join(long_rows[:4]) + ("…" if len(long_rows) > 4 else "")
          + (f"（跳过 {closed_cnt} 张收口/作废）" if closed_cnt else "")
+         + unparsed_note
          + "；一句话结果之外的细节写进 STATUS 或结果说明") if long_rows else skip_note, True)
 
     entries, cur = [], None
@@ -808,9 +906,10 @@ def advisories(root: Path, agents: str, status: str, sec4: str, blocks: list[str
 
     if not blocks:
         add("A011", "STATUS 最近 5 段交接 ≤800 字且四节齐", False,
-            "未找到交接段（标题须含 Handoff/交接 或以 YYYY-MM-DD 开头）", True)
+            "未找到交接段（## 或 ### 标题须含 Handoff/交接，或以日期 / T<卡号>+日期 开头；“交回说明”等不算交接）", True)
     else:
-        d_first, d_last = latest(blocks[0], today), latest(blocks[-1], today)
+        d_first = latest(blocks[0].splitlines()[0], today) or latest(blocks[0], today)
+        d_last = latest(blocks[-1].splitlines()[0], today) or latest(blocks[-1], today)
         rev_order = bool(d_first and d_last and d_first > d_last)
         recent_blocks = blocks[:5] if rev_order else blocks[-5:]
         bad_segs: list[str] = []
@@ -1003,10 +1102,27 @@ def sec4_card_drifts(sec4: str, states: dict[str, tuple[str, str]]) -> list[str]
     return drifts
 
 
+def progress_section_unfenced(text: str) -> str:
+    """Return unfenced lines inside the '## 进度回写' section of a task card."""
+    lines = text.splitlines()
+    unfenced = unfenced_indices(lines)
+    start: Optional[int] = None
+    for i in sorted(unfenced):
+        if re.match(r"^##\s*进度回写", lines[i]):
+            start = i
+            break
+    if start is None:
+        return ""
+    end = next(
+        (j for j in range(start + 1, len(lines)) if j in unfenced and lines[j].startswith("## ")),
+        len(lines),
+    )
+    return "\n".join(lines[j] for j in range(start + 1, end) if j in unfenced)
+
+
 def single_card_state(text: str) -> Optional[str]:
-    head = re.search(r"(?m)^##\s*进度回写.*$", text)
-    body = text[head.end():].split("\n## ", 1)[0] if head else ""
-    line = re.search(r"(?m)^\s*[-*]\s*\**状态\**[:：](.*)$", body)
+    body = progress_section_unfenced(text)
+    line = CARD_STATE_LINE_RE.search(body)
     mark = STATE_RE.search(line.group(1)) if line else None
     return mark.group(0) if mark else None
 

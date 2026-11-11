@@ -34,7 +34,7 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 8. **脚本归位**：建 `scripts/` + `scripts/README.md`（`assets/scripts_README.md`），复制 `assets/check_handoff.py` 与 `assets/archive_status.py`（旧项目若有不认识 `--scope` 的旧检查器先整体替换）：
    - 收工自检：线级跑 `python scripts/check_handoff.py --scope line`（脚本在上级目录用 `../scripts/`；多线根跑 `--scope index`），检查 H001–H009 阻断项与 A001–A015 提示项（体积、提示词完整性、大节拆解、状态同步、取代链自洽、【待填】余量、交接四节 ≤800 字、复核报告 `PASS`/`NEEDS_FIX` 结论行）。
    - 一键归档：`STATUS.md` >40KB 或 `AGENTS.md` §3 >5 条时，跑 `python scripts/archive_status.py` 保留最近 N 段（默认 10）交接与 §3 最近 5 条快照，其余原样迁入 `文档/*_归档_至<日期>.md` 并在入口留一行 `>` 引用（不要写成带日期的 `#` 标题）。
-9. **建 `STATUS.md`**：从 `assets/STATUS.md` 复制；首次建骨架即可填入建项当日的初始化交接段（“谁做的”一行＋四节：改了什么 / 怎么验证的 / 没做什么 / 不确定处，≤800 字，去掉 `YYYY-MM-DD` 占位符）。
+9. **建 `STATUS.md`**：从 `assets/STATUS.md` 复制；首次建骨架即可填入建项当日的初始化交接段（“谁做的”一行＋四节：改了什么 / 怎么验证的 / 没做什么 / 不确定处，≤800 字，去掉 `YYYY-MM-DD` 占位符）。交接标题支持 `##` 或 `###`，须含 `Handoff` 或 `交接`（或以日期 / `T<卡号>+日期` 开头；日期支持 `YYYY-MM-DD`、`YYYY/MM/DD`、`YYYY.MM.DD`、`YYYY年MM月DD日`；`## 交回说明`、`## 归档说明` 等不算交接段）。
 10. **写入约束**：把环境路径、行为红线、工作盘分流分别填入线级 §7、§5、§5.5。
 11. **验证交回**：运行 `python scripts/check_handoff.py`（若保留了 `【待填】`/`YYYY-MM-DD` 占位符，H003–H005 会提示待填项；填妥当日初始状态后应全绿）与 `python scripts/archive_status.py --dry-run`（新骨架仅用 `--dry-run` 验证脚本能跑，日后收到 A003 `STATUS` 超限或 A008 §3 超限提示时再去掉 `--dry-run` 正式归档），告知用户已生成的文件、默认值和待确认项。
 
