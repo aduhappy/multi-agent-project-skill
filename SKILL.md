@@ -1,6 +1,6 @@
 ---
 name: multi-agent-project
-description: 初始化或重构"跨 agent、跨软件可续接"的项目文档骨架。当用户开新项目/新课题、想建立多智能体协同工作流、提到 AGENTS.md / CLAUDE.md / GEMINI.md / .cursorrules / copilot-instructions / 项目记忆 / agent 接力 / 换软件继续 / 上下文丢失，或现有项目缺统一入口导致每个 agent 反复问相同问题、互相覆盖、接不上前任工作时使用。即使是"帮我建个项目文档""怎么让多个 AI 工具协同""开个新课题要准备什么"这类模糊请求也适用。
+description: 初始化或重构"跨 agent、跨软件可续接"的项目文档骨架。当用户开新项目/新课题、想建立多智能体协同工作流、提到 AGENTS.md / CLAUDE.md / GEMINI.md / .cursorrules / copilot-instructions / 项目记忆 / agent 接力 / 换软件继续 / 上下文丢失，或现有项目缺统一入口导致每个 agent 反复问相同问题、互相覆盖、接不上前任工作时使用。即使是"帮我建个项目文档""怎么让多个 AI 工具协同""开个新课题要准备什么"这类模糊请求也适用。不适用于单文件小脚本、已有完善入口且无需改动的项目、纯翻译或问答。
 ---
 
 # 多 Agent 协同项目骨架（跨软件可续接）
@@ -32,7 +32,7 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 6. **可选专题文件**：有软件/环境坑时拷 `assets/环境坑.md` → `文档/环境坑.md`（单一来源）；按需建 `文档/决策记录/`、`文档/词汇表.md`（进阶板块见 [`references/advanced.md`](references/advanced.md)）。已完成且不再读的文档可标“已归档”节省认知负荷。
 7. **数据集溯源**：每类数据目录放 `来源.txt`（从 `assets/来源.txt` 复制）；无明确数据源可跳过。
 8. **脚本归位**：建 `scripts/` + `scripts/README.md`（`assets/scripts_README.md`），复制 `assets/check_handoff.py` 与 `assets/archive_status.py`（旧项目若有不认识 `--scope` 的旧检查器先整体替换）：
-   - 收工自检：线级跑 `python scripts/check_handoff.py --scope line`（脚本在上级目录用 `../scripts/`；多线根跑 `--scope index`），检查 H001–H009 阻断项与 A001–A012 提示项（体积、提示词完整性、大节拆解、状态同步、交接四节 ≤800 字、复核报告 `PASS`/`NEEDS_FIX` 结论行）。
+   - 收工自检：线级跑 `python scripts/check_handoff.py --scope line`（脚本在上级目录用 `../scripts/`；多线根跑 `--scope index`），检查 H001–H009 阻断项与 A001–A015 提示项（体积、提示词完整性、大节拆解、状态同步、取代链自洽、【待填】余量、交接四节 ≤800 字、复核报告 `PASS`/`NEEDS_FIX` 结论行）。
    - 一键归档：`STATUS.md` >40KB 或 `AGENTS.md` §3 >5 条时，跑 `python scripts/archive_status.py` 保留最近 N 段（默认 10）交接与 §3 最近 5 条快照，其余原样迁入 `文档/*_归档_至<日期>.md` 并在入口留一行 `>` 引用（不要写成带日期的 `#` 标题）。
 9. **建 `STATUS.md`**：从 `assets/STATUS.md` 复制；首次建骨架即可填入建项当日的初始化交接段（“谁做的”一行＋四节：改了什么 / 怎么验证的 / 没做什么 / 不确定处，≤800 字，去掉 `YYYY-MM-DD` 占位符）。
 10. **写入约束**：把环境路径、行为红线、工作盘分流分别填入线级 §7、§5、§5.5。
@@ -59,7 +59,7 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 ├── <数据集名>/来源.txt                ← DOI/URL/日期/口径/单位
 └── scripts/
     ├── README.md                      ← 脚本索引
-    ├── check_handoff.py               ← 收工交接自检（H001–H009 + A001–A012）
+    ├── check_handoff.py               ← 收工交接自检（H001–H009 + A001–A015）
     └── archive_status.py              ← STATUS 与 AGENTS §3 一键归档
 ```
 

@@ -1,6 +1,7 @@
 # Multi-Agent Project Skill
 
 > 跨 agent、跨软件可续接的项目文档骨架生成器。一个权威入口 + 薄指针 + 自包含任务卡 + 收工规矩，全用纯 Markdown——换 Claude / Cursor / Gemini / ZCode / Codex / Copilot 任何一个，agent 进来读同一份入口就能接上前任工作。
+> **English Overview**: [`README.en.md`](README.en.md)
 
 [![License: MIT](https://img.shields.io/badge/Code-MIT-blue.svg)](LICENSE-MIT)
 [![License: CC BY-SA 4.0](https://img.shields.io/badge/Content-CC--BY--SA--4.0-green.svg)](LICENSE-CC-BY-SA-4.0)
@@ -16,9 +17,7 @@
 
 > **把 `aduhappy/multi-agent-project-skill` 装成 skill**
 
-agent 会自己判断操作系统、把仓库 clone 到本工具的 skills 目录、装完提示你新开会话即可触发。**无需手动选平台、无需手动挑路径。**
-
-目标 skills 目录（agent 会根据当前工具自行选对）：
+agent 会自己判断操作系统、把仓库 clone 到本工具的 skills 目录、装完提示你新开会话即可触发。**无需手动选平台、无需手动挑路径。**（完整各工具路径见 [`references/install.md`](references/install.md)。）
 
 | 工具 | 用户级路径 | 项目级路径 |
 |---|---|---|
@@ -38,7 +37,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git ~/.agents/sk
 git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skills/multi-agent-project
 ```
 
-> Windows 用户的 `~` 对应 `%USERPROFILE%`；若 skills 目录不存在，先 `mkdir` 再 clone。
+> Windows 用户的 `~` 对应 `%USERPROFILE%`；若 skills 目录不存在，先 `mkdir` 再 clone。**末段目录名必须保持 `multi-agent-project`**。
 
 ---
 
@@ -46,13 +45,13 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 一个 [Agent Skill](https://agentskills.io/)：在项目根目录生成一套**软件无关的纯 Markdown 协同骨架**。支持单线 `line` 与多线根索引 `index` 两种 scope；根索引只导航，线级入口才承载详细状态。
 
-设计目标——**真相只有一份**：`AGENTS.md` 是唯一权威入口，其他工具的约定文件（`CLAUDE.md` / `GEMINI.md` / `.cursorrules` / `.github/copilot-instructions.md`）全是 3 行薄指针，指向 `AGENTS.md`。换任何 AI 工具，agent 都读同一份入口，不丢上下文、不互相覆盖。
+设计目标——**真相只有一份**：`AGENTS.md` 是唯一权威入口，其他工具的约定文件（`CLAUDE.md` / `GEMINI.md` / `.cursor/rules/*.mdc` / `.github/copilot-instructions.md`）全是薄指针或导入，指向 `AGENTS.md`。换任何 AI 工具，agent 都读同一份入口，不丢上下文、不互相覆盖。
 
 四条核心原则：
-1. **真相只有一份** — AGENTS.md 是唯一权威入口
-2. **细节外链、入口要短** — 入口 1–2 屏，细则下沉
-3. **纯 Markdown + 相对路径** — 换工具不破
-4. **信任但验证** — agent 自检不够，关键产物须独立复核才放行
+1. **真相只有一份** — `AGENTS.md` 是唯一权威入口
+2. **细节外链、入口要短** — 入口 1–2 屏，细则下沉到 `文档/` 专题文件，超限由脚本归档
+3. **纯 Markdown + 相对路径 + 标准库脚本** — 换工具不破，无第三方依赖
+4. **信任但验证** — agent 自检不够，关键产物须按分级独立复核通过才放行下游
 
 ### 和同类 skill 的区别
 
@@ -62,113 +61,51 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 | **本 skill（multi-agent-project）** | **多 agent 接力的协同骨架** + 任务卡 + 数据溯源 + handoff | **科研 / 数据密集 / 多数据集 / 长管线项目** |
 
 本 skill 的差异化亮点：
-- **路径约定**——大文件进工作盘、小产物回仓库（防云同步爆炸 / 多 agent 撞车）
+- **路径约定（§5.5）**——大文件进工作盘、小产物回仓库（防云同步爆炸 / 多 agent 撞车）
 - **数据集 `来源.txt`**——DOI/URL/日期/口径/单位，换人换 agent 都能溯源
-- **自包含任务卡**——冷启动可执行，零上下文 agent 能直接动手（含"交付前必做"收尾清单 + 可选建议模型）
-- **决策记录（ADR）+ 词汇表 + 进度日志**——防下个 agent 重新踩坑、重新质疑已定的事
-- **独立复核阀门**——"别信自检"，关键产物必须主控/第三 agent 抽验后才放行下一棒
-- **关键数字与口径参数防漂移**——同一数字只在一处写定；口径/样本集抽进唯一 config，别在多脚本各自硬编码；收工核对一致性
-- **坏产物与被取代脚本退役**——错产物、被决策取代的旧脚本立即标作废，静默复用比没产出更致命
-- **派发提示词含已知坑+自查清单**——随任务卡走，引导 agent 在报完成前自拦截常见错误类型
-- **AGENTS.md 顶部 TL;DR 块**——3 行速读（当前阶段/下一步/阻塞），新 agent 不用读全文就知状态
-- **STATUS.md 增量 handoff**——只记"本轮做了什么/动了哪些文件/踩了什么坑"，和 AGENTS.md §3 累计快照不重叠
-- **check_handoff.py 收工自检**——脚本验证 §3 日期新鲜/TL;DR 已填/STATUS 非模板/薄指针存在，全过才算交接合格
-- **任务卡目录索引**——依赖链 + 当前状态表 + 卡面规矩（谁改哪里、何时开新卡、体积线、写作类“目标＋底线”自由度、冷读复核、可选的阶段通读），卡不会越写越大
-- **双提示词与身份留痕**——关键卡同时带执行方和复核方提示词，写明谁（工具/模型/家族）做的；未知写 `UNKNOWN`，不算通过
-- **根/线 scope**——多线根只做索引，线级入口自包含；`check_handoff.py --scope index|line` 分开检查
+- **自包含任务卡与目录索引**——一个任务一张卡（执行 + 独立复核同卡双提示词），`文档/任务卡_README.md` 集中管理依赖链与卡面规矩
+- **决策登记表（§3.5）+ 决策记录 + 词汇表**——`ACTIVE`/`SUPERSEDED` 双向链防静默覆盖，避免下个 agent 重新踩坑
+- **跨模型家族独立复核阀门**——分析建模必独立复核、论文头条数字必跨模型家族复核，重开最终交付物本身核对
+- **关键数字与口径参数防漂移**——同一数字只在一处写定，口径抽进唯一 `config`，计数与派生数一律由脚本算出
+- **`STATUS.md` 增量 handoff + 一键自检归档**——`check_handoff.py` 检查阻断项与提示项，`archive_status.py` 保持原换行符一键归档旧段
+
 ## 何时触发
 
-说任一句都会触发：
+说任一句都会触发（单文件小脚本、已有完善入口且无需改动、纯翻译或问答不触发）：
 - "开新项目/新课题""怎么组织文档让 AI 协同""AGENTS.md 怎么写"
 - "多个 agent 接力""换软件继续""上下文丢失"
 - "帮我建个项目文档""怎么让多个 AI 工具协同"
 
 ## 兼容性
 
-遵循 [agents.md](https://agents.md/) 开放标准（60k+ 开源项目在用），兼容：
+遵循 [agents.md](https://agents.md/) 开放标准，兼容：
 
 | 工具 | 入口文件 | 支持 |
 |---|---|---|
-| Claude Code | `CLAUDE.md` → AGENTS.md | ✅ |
-| Cursor | `.cursorrules` / `.cursor/rules/` | ✅（`.cursorrules` 为 legacy，推荐 `.cursor/rules/*.mdc`）|
-| Gemini CLI | `GEMINI.md` → AGENTS.md | ✅ |
-| GitHub Copilot | `.github/copilot-instructions.md` | ✅ |
+| Claude Code | `CLAUDE.md`（含 `@AGENTS.md` 自动导入）→ `AGENTS.md` | ✅ |
+| Cursor | `.cursor/rules/*.mdc` / `.cursorrules` | ✅（推荐 `.cursor/rules/*.mdc`，`.cursorrules` 为 legacy）|
+| Gemini CLI | `GEMINI.md` → `AGENTS.md` | ✅ |
+| GitHub Copilot（IDE） | `.github/copilot-instructions.md` → `AGENTS.md` | ✅ |
+| GitHub Copilot CLI | `AGENTS.md`、`.github/copilot-instructions.md`、`CLAUDE.md`、`GEMINI.md` | ✅（原生发现仓库根、当前目录及路径各层上述文件）|
 | OpenAI Codex | `AGENTS.md` | ✅ |
 | ZCode | `AGENTS.md` | ✅ |
 | 任何文本工具 | `AGENTS.md`（纯 Markdown） | ✅ |
 
 ## 只要模板文件，不要 skill
 
-不想装成 skill、只想要骨架文件？直接复制 `assets/` 目录下的文件到你的项目：
-- 单线项目：`assets/AGENTS.md` → 线目录 `AGENTS.md`
-- 多线项目根：`assets/ROOT_AGENTS.md` → 课题根 `AGENTS.md`
-- 多线项目每条线：`assets/AGENTS.md` → `<线目录>/AGENTS.md`
-- `assets/任务规划_模板.md` → 任务卡（一个任务一张卡，执行与独立复核同卡、各带派发提示词）
-- `assets/任务卡_README.md` → `文档/任务卡_README.md`（任务卡索引与卡面规矩）
-- `assets/环境坑.md` → `文档/环境坑.md`（可选：软件与环境避坑单一来源）
-- `assets/来源.txt` → 各数据集目录
-- `assets/check_handoff.py`、`assets/archive_status.py` → 项目 `scripts/`
+不想装成 skill、只想要骨架文件？直接复制 [`assets/`](assets/) 目录下的模板与脚本到你的项目（单线拷 `assets/AGENTS.md`，多线课题根拷 `assets/ROOT_AGENTS.md`；任务卡与索引拷 `assets/任务规划_模板.md`、`assets/任务卡_README.md`；自检与归档脚本拷 `assets/check_handoff.py`、`assets/archive_status.py`）。
 
 > ⚠️ 中文文件名注意：如果你的 toolchain 对中文路径挑剔，在**你自己的项目里**改用 ASCII 文件名并更新线级入口指针；不要改变本 skill 的安装目录 `multi-agent-project`。
 
+收工自检与归档：线级运行 `python scripts/check_handoff.py --scope line`（多线根用 `--scope index`），涵盖 `H001–H009` 阻断项与 `A001–A015` 提示项；体积超限时运行 `python scripts/archive_status.py` 归档旧段。技能仓库自身运行 `python tests/test_skill.py`。
 
-`check_handoff.py` 收工自检：线级运行 `python ../scripts/check_handoff.py`（脚本在线目录里就去掉 `../`），查 §3 日期新鲜、TL;DR 已填、STATUS 非模板、STATUS 日期 ≥ §3、§4 看板、薄指针；另有 12 条只提示不阻断的提醒（决策登记表、多脚本常量漂移、入口与索引体积、看板全未勾、任务卡缺派发提示词、任务卡过大并列最大三节、卡面状态与看板／索引对不上、§3 超 5 条或挂着已收口卡、“进度回写”单行或 §3 单条过长、STATUS 最新交接段 ≤800 字且四节齐、复核报告末尾 `PASS`/`NEEDS_FIX` 结论行）。体积超限时运行 `python scripts/archive_status.py` 一键归档旧段。多线课题的根目录用 `--scope index` 查索引。项目里若有不认识 `--scope` 的旧副本，先整体替换成本版。技能仓库自身运行 `python tests/test_skill.py`。
+## 骨架结构、入口板块与十条硬要求（唯一权威清单见 `SKILL.md`）
 
-## 生成的文件骨架
+为避免 README 与技能定义出现双份清单漂移，详细规范统一维护在 [`SKILL.md`](SKILL.md) 中：
 
-```
-<项目根>/
-├── AGENTS.md                          ← 唯一权威入口（7 板块 + TL;DR + 路径约定）
-├── STATUS.md                          ← 增量 handoff（每段四节 ≤800 字）
-├── CLAUDE.md                          ← 薄指针 → "以 AGENTS.md 为准"
-├── GEMINI.md                          ← 薄指针
-├── .cursor/rules/multi-agent.mdc      ← 薄指针（Cursor 现代格式，.cursorrules 为 legacy）
-├── .github/copilot-instructions.md    ← 薄指针（Copilot）
-├── 文档/
-│   ├── 任务卡/                           ← 新项目推荐；旧项目可暂留平铺任务卡
-│   │   └── T1_<主题>.md                  ← 自包含任务卡
-│   ├── 任务卡_README.md                   ← 任务卡目录索引（依赖链 + 状态表 + 卡面规矩）
-│   ├── 环境坑.md                          ← 软件/环境避坑单一来源（可选）
-│   ├── 决策记录/                      ← 关键技术决策（ADR）
-│   └── 词汇表.md                      ← 项目术语
-├── <数据集名>/
-│   ├── 来源.txt                       ← DOI/URL/日期/口径
-│   └── ...
-├── scripts/                           ← 代码归位（不散落根目录）
-│   ├── README.md                      ← 脚本索引：干嘛/输入/输出/作者
-│   ├── check_handoff.py               ← 收工交接自检脚本
-│   └── archive_status.py              ← STATUS 与 AGENTS §3 一键归档脚本
-└── 进度日志.md                        ← 带日期戳的变更流水
-```
-
-## AGENTS.md 的板块（顺序即优先级）
-
-模板编号 1–7，其中**路径约定单独编号为 §5.5**（太重要，不能和铁律混在一起）。共 8 个板块：
-
-1. **一句话北极星**——项目到底干嘛、给谁、什么基调
-2. **当前故事/方法**——最新方向 + 核心方法 + 最近换过什么
-3. **现在在哪**——每次收工更新，1–5 条带日期戳（接力最关键的交接点）
-4. **任务看板**——`[ ]`/`[x]` + 谁负责 + 依赖 + 已知风险
-5. **铁律/约定**——违反会返工的：环境调用、绘图/数据规矩、命名、口径、收工规矩
-5.5. **路径约定**——大文件去哪、小产物回哪（防云同步爆炸/多 agent 撞车，单独成节）
-6. **深读指针**——细节去哪个文档
-7. **环境/工具**——完整工具路径怎么调、env 锁
-
-完整说明见 [`references/advanced.md`](references/advanced.md)（按需启用的决策、词汇表、进度日志、验收、handoff、命名、环境锁、数据快照、复核和数字核对板块）。
-
-## 跨软件能续的十个硬要求
-
-1. **纯 Markdown + 相对路径 + 标准文件名**——别用某软件专属语法
-2. **数据带 `来源.txt`**（DOI/URL/日期/口径/单位）——换人换 agent 都能溯源
-3. **收工规矩写进铁律**——谁改哪里只在 `assets/任务卡_README.md` 一张表里写；`STATUS.md` 是 handoff 落盘文件，下个 agent 读这个就能接上，不依赖对话历史
-4. **路径纪律**——"大文件进工作盘、小产物回仓库""复制不剪切"
-5. **新 agent（含子 agent）进门第一件事**——读完 AGENTS.md（含 STATUS.md）再动手；具约束力的决策上浮到**有界必读层**（§3 / 决策登记表），别埋在 STATUS 长叙事里
-6. **关键数字与口径参数单一来源**——数字只在一处写定；**口径/样本集/排除清单抽进唯一 config，所有脚本读它、别在多脚本各自硬编码**；收工核对文档与脚本一致性
-7. **坏产物与被取代脚本一并退役**——错产物标 `_DEPRECATED` + 红字通告 + 看板更新；被决策取代的旧脚本也加退役注释。
-8. **谁做的要留痕**——任务卡和 STATUS 写明工具、模型、模型家族和日期；未知写 `UNKNOWN`，不从工具名推断，不算通过
-9. **关键数字换个方法核一遍**——对不上记 `UNKNOWN`，不往下游放
-10. **哈希只记判据用得上的**——交付物、声称未改的输入才记；不给每份日志/快照逐个记哈希
-
+- **生成的文件骨架**：`AGENTS.md` + `STATUS.md` + 薄指针 + `文档/`（`任务卡/`、`任务卡_README.md`、可选 `环境坑.md`/`决策记录/`/`词汇表.md`）+ `<数据集>/来源.txt` + `scripts/`（`check_handoff.py`、`archive_status.py`）。完整目录树见 [`SKILL.md` §文件骨架](SKILL.md#文件骨架)。
+- **`AGENTS.md` 板块与边界**：顶部 `TL;DR` + `§1–§7`（含 `§3.5` 决策登记表、`§5` 行为铁律与 `§5.5` 路径约定分离）。各节职责见 [`SKILL.md` §AGENTS.md 板块与边界](SKILL.md#agentsmd-板块与边界照-assetsagentsmd-填)，填好完整样例见 [`references/example_filled_AGENTS.md`](references/example_filled_AGENTS.md)。
+- **跨软件能续的 10 条硬要求与 5 步工作流**：纯 Markdown、数据带 `来源.txt`、角色与 scope 收工纪律、工作盘分流、进门先读并 grep 决策表、数字口径单一来源、坏产物退役隔离、工具/模型/家族留痕、双源交叉测量、按需记哈希。逐条说明见 [`SKILL.md` §跨软件能续的 10 条硬要求](SKILL.md#跨软件能续的-10-条硬要求)，按需进阶模块见 [`references/advanced.md`](references/advanced.md)。
 
 ## 两层续接（缺一不可）
 
@@ -179,7 +116,7 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 ## 起源
 
-这套骨架来自一个真实科研项目的多 agent 实战——多源数据集、长分析管线（拉数据 → 清洗 → 建模 → 重建）、云同步工作目录、Claude + Cursor + ZCode 多软件接力。踩过的坑（agent 覆盖彼此产出、找不到状态、云同步卡死、下个 agent 重新质疑已定方向）都固化成了铁律。
+这套骨架来自真实科研项目的多 agent 实战——多源数据集、长分析管线（拉数据 → 清洗 → 建模 → 制图与报告）、云同步工作目录、多软件多模型家族接力。踩过的坑（agent 覆盖彼此产出、找不到状态、云同步卡死、下个 agent 重新质疑已定方向）都固化成了铁律与自检项。
 
 ## 许可证
 
@@ -194,6 +131,6 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 下列项目为本 skill 的设计提供了关键启发：
 
-- [netresearch/agent-rules-skill](https://github.com/netresearch/agent-rules-skill) —— 双许可证结构、README 发布标配、薄指针（CLAUDE.md 9 字节）的做法
-- [breezewish/CodexPotter](https://github.com/breezewish/CodexPotter) —— 跨轮次文件记忆（STATUS.md）、新 agent 进门仪式、任务委派话术的灵感
+- [netresearch/agent-rules-skill](https://github.com/netresearch/agent-rules-skill) —— 双许可证结构、README 发布标配、薄指针的做法
+- [breezewish/CodexPotter](https://github.com/breezewish/CodexPotter) —— 跨轮次文件记忆（`STATUS.md`）、新 agent 进门仪式、任务委派话术的灵感
 - [OthmanAdi/planning-with-files](https://github.com/OthmanAdi/planning-with-files) —— 生命周期钩子驱动的工作流、完成闸门、会话恢复模式
