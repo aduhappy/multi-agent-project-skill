@@ -269,6 +269,208 @@ def test_040_features() -> None:
               "archived AGENTS.md §3 must pass H003 and A008:\n" + out)
 
 
+def test_r1_a007_merged_inline_states() -> None:
+    """Fix 1: §4 line listing multiple cards with inline status emojis checks each card individually."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        cards_dir = line / "文档" / "任务卡"
+        write(cards_dir / "T10g_报告.md", "# T10g\n\n## 进度回写\n- 状态：✅已收口\n")
+        write(cards_dir / "T10h_图集.md", "# T10h\n\n## 进度回写\n- 状态：🗄️作废（由 T12g 接续）\n")
+        write(cards_dir / "T12a_分析.md", "# T12a\n\n## 进度回写\n- 状态：✅已收口\n")
+        write(cards_dir / "T12b_配图.md", "# T12b\n\n## 进度回写\n- 状态：✅已收口\n")
+        write(
+            cards_dir / "T12g_图集40页.md",
+            "# T12g\n\n## 进度回写\n- 状态：🟡待复核\n\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n",
+        )
+        write(
+            cards_dir / "T13b_技能升级.md",
+            "# T13b\n\n## 进度回写\n- 状态：⏳执行中\n\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n",
+        )
+        write(cards_dir / "T10_MVP.md", "# T10\n\n## 进度回写\n- 状态：🗄️作废\n")
+
+        merged_sec4 = (
+            "## 4. 任务看板\n"
+            "- [x] **T10 MVP** —— 🗄️ 作废\n"
+            "- [ ] **T10g 报告**✅、**T10h 图集**🗄️（由 T12g 接续）、**T12g 图集 40 页**⬜、"
+            "**T12a/b 结构版**✅、**T13b 技能 0.4.0**⬜　- [ ] **T11 二期**（依赖 T10）\n"
+        )
+        base_agents = (line / "AGENTS.md").read_text(encoding="utf-8")
+        write(line / "AGENTS.md", base_agents.split("## 4. 任务看板")[0] + merged_sec4)
+        rc, out = run(line)
+        check(
+            rc == 0 and "[A007] ✅" in out,
+            "merged §4 line with synced inline emojis must pass A007 without false alarm on T10g:\n" + out,
+        )
+
+        # Drift on non-first card (T13b closed on card, still ⬜ inline on §4) AND slash card (T12b ⬜ on card, ✅ inline)
+        write(cards_dir / "T13b_技能升级.md", "# T13b\n\n## 进度回写\n- 状态：✅已收口\n")
+        write(
+            cards_dir / "T12b_配图.md",
+            "# T12b\n\n## 进度回写\n- 状态：⬜可派\n\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n",
+        )
+        rc, out = run(line)
+        check(
+            rc == 0 and "[A007] ⚠️" in out and "T13b 卡面 ✅／§4 ⬜" in out and "T12b 卡面 ⬜／§4 ✅" in out,
+            "merged §4 line must detect drift on later cards and slash-grouped cards:\n" + out,
+        )
+        check("T10g 卡面" not in out, "synced first card T10g must still not be falsely flagged:\n" + out)
+
+
+def test_r1_index_template_no_collision() -> None:
+    """Fix 2: Fresh skeleton copying assets/任务卡_README.md + real T1 card (⬜可派) passes A007 on first run."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        index_asset = (REPO / "assets" / "任务卡_README.md").read_text(encoding="utf-8")
+        write(line / "文档" / "任务卡_README.md", index_asset)
+        write(
+            line / "文档" / "任务卡" / "T1_数据清洗.md",
+            "# T1 数据清洗\n\n## 进度回写\n- 状态：⬜可派\n\n"
+            "## 📋 执行方派发提示词\n做\n\n## 📋 独立复核方派发提示词\n核\n",
+        )
+        base_agents = (line / "AGENTS.md").read_text(encoding="utf-8")
+        write(
+            line / "AGENTS.md",
+            base_agents.split("## 4. 任务看板")[0] + "## 4. 任务看板\n- [ ] **T1 数据清洗**\n",
+        )
+        rc, out = run(line)
+        check(
+            rc == 0 and "[A007] ✅" in out and "[A005] ✅" in out,
+            "fresh skeleton with verbatim 任务卡_README.md template and T1 ⬜ card must pass A007 & A005:\n" + out,
+        )
+
+
+def test_r1_a005_skips_closed_and_deprecated() -> None:
+    """Fix 3: A005 ignores closed (✅) and deprecated (🗄️) cards whose prompts were deleted at closure."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        cards_dir = line / "文档" / "任务卡"
+        write(cards_dir / "T1_已收口无提示词.md", "# T1\n\n## 进度回写\n- 状态：✅已收口\n")
+        write(cards_dir / "T1d_已作废无提示词.md", "# T1d\n\n## 进度回写\n- 状态：🗄️作废（D-21）\n")
+        write(
+            cards_dir / "T2_在用齐全.md",
+            "# T2\n\n## 进度回写\n- 状态：⬜可派\n\n## 📋 执行方派发提示词\n做\n\n## 📋 独立复核方派发提示词\n核\n",
+        )
+        base_agents = (line / "AGENTS.md").read_text(encoding="utf-8")
+        write(
+            line / "AGENTS.md",
+            base_agents.split("## 4. 任务看板")[0]
+            + "## 4. 任务看板\n- [x] **T1 已收口**\n- [x] **T1d 作废**\n- [ ] **T2 在用**\n",
+        )
+        rc, out = run(line)
+        check(
+            rc == 0 and "[A005] ✅" in out,
+            "closed/deprecated cards without prompts must be skipped by A005:\n" + out,
+        )
+
+        # Active card (⏳执行中 / 🟡待复核) missing reviewer prompt must still trigger A005
+        write(cards_dir / "T3_执行中缺复核.md", "# T3\n\n## 进度回写\n- 状态：⏳执行中\n\n## 📋 执行方派发提示词\n做\n")
+        rc, out = run(line)
+        check(
+            rc == 0 and "[A005] ⚠️" in out and "T3_执行中缺复核.md" in out
+            and "T1_已收口无提示词.md" not in out and "T1d_已作废无提示词.md" not in out,
+            "A005 must flag only active card missing prompt, not closed/deprecated ones:\n" + out,
+        )
+
+
+def test_r1_h004_prose_vs_template_placeholders() -> None:
+    """Fix 4: H004 allows normal prose ('例：', 'e.g.', 'TODO') while blocking unfilled templates."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        agents_tpl = (
+            "# AGENTS\n\n> **Scope: line**\n\n> ⚡ **TL;DR**\n"
+            "{tldr_body}\n---\n\n"
+            "## 3. 现在在哪\n- 2026-09-15：初稿完成\n\n## 3.5 决策登记表\n| ID | 决策 |\n|---|---|\n\n"
+            "## 4. 任务看板\n- [x] T1 初稿\n"
+        )
+        # Normal prose containing 例：, e.g., TODO must PASS H004 (exit code 0)
+        for valid_tldr in (
+            "> - **当前阶段**：T1–T9 已收口（例：19 张图已换 GS(2024)0650 标准边界）\n> - **下一步**：派 T12g\n> - **阻塞**：无",
+            "> - **当前阶段**：跑通自检脚本（e.g. check_handoff.py）\n> - **下一步**：清理源码 TODO 注释\n> - **阻塞**：无",
+        ):
+            write(line / "AGENTS.md", agents_tpl.format(tldr_body=valid_tldr))
+            rc, out = run(line)
+            check(rc == 0 and "[H004] ✅" in out, f"filled TL;DR prose must pass H004:\n{valid_tldr}\n{out}")
+
+        # Raw assets/AGENTS.md TL;DR and unedited template phrases/placeholders must FAIL H004 (exit code 1)
+        raw_asset_agents = (REPO / "assets" / "AGENTS.md").read_text(encoding="utf-8")
+        write(
+            line / "AGENTS.md",
+            raw_asset_agents.replace("2026-06-15", TODAY),
+        )
+        rc, out = run(line)
+        check(rc == 1 and "[H004] ❌" in out, "raw assets/AGENTS.md template must fail H004:\n" + out)
+
+        for bad_tldr in (
+            "> - **当前阶段**：【待填】\n> - **下一步**：写方法\n> - **阻塞**：无",
+            "> - **当前阶段**：例 T3 进行中\n> - **下一步**：写方法\n> - **阻塞**：无",
+            "> - **当前阶段**：已完成初稿\n> - **下一步**：第一个动作，精确到文件/命令\n> - **阻塞**：无",
+            "> - **当前阶段**：已完成初稿\n> - **下一步**：写方法\n> - **阻塞**：无 / 等用户确认 X / 等数据下载",
+            "> - **当前阶段**：[TODO]\n> - **下一步**：写方法\n> - **阻塞**：无",
+            "> - **当前阶段**：初稿（YYYY-MM-DD）\n> - **下一步**：写方法\n> - **阻塞**：无",
+            "> - **当前阶段**：\n> - **下一步**：写方法\n> - **阻塞**：无",
+        ):
+            write(line / "AGENTS.md", agents_tpl.format(tldr_body=bad_tldr))
+            rc, out = run(line)
+            check(rc == 1 and "[H004] ❌" in out, f"unfilled template TL;DR must fail H004:\n{bad_tldr}\n{out}")
+
+
+def test_r1_asset_keywords_and_restored_refs() -> None:
+    """Items 5 & 6: Keyword assertions on key templates and restored sentences in references."""
+    status_tpl = (REPO / "assets" / "STATUS.md").read_text(encoding="utf-8")
+    for kw in ("谁做的", "改了什么", "怎么验证的", "没做什么", "不确定处", "archive_status.py"):
+        check(kw in status_tpl, f"assets/STATUS.md missing keyword: {kw}")
+
+    readme_tpl = (REPO / "assets" / "任务卡_README.md").read_text(encoding="utf-8")
+    for kw in (
+        "## 会出错",
+        "## 建议",
+        "NEEDS_FIX",
+        "只按“会出错”返工",
+        "核查类卡不替复核方划范围",
+        "闸门查交付物本身",
+        "计数和派生数一律脚本给出",
+        "主控收口三查",
+    ):
+        check(kw in readme_tpl, f"assets/任务卡_README.md missing keyword: {kw}")
+    check("| T1 |" not in readme_tpl, "assets/任务卡_README.md must not have real '| T1 |' example row")
+
+    agents_tpl = (REPO / "assets" / "AGENTS.md").read_text(encoding="utf-8")
+    for kw in ("archive_status.py", "环境坑.md", "重开最终交付物", "计数与派生数一律由脚本", "决策登记表_全文.md"):
+        check(kw in agents_tpl, f"assets/AGENTS.md missing keyword: {kw}")
+
+    card_tpl = (REPO / "assets" / "任务规划_模板.md").read_text(encoding="utf-8")
+    for kw in ("主控在立项前看过什么", "## 会出错", "NEEDS_FIX", "环境坑.md"):
+        check(kw in card_tpl, f"assets/任务规划_模板.md missing keyword: {kw}")
+
+    adv_ref = (REPO / "references" / "advanced.md").read_text(encoding="utf-8")
+    for kw in (
+        "模型战绩.csv",
+        "任务契约",
+        "两个不同字段，不得混用",
+        "短链路（1–2 个 agent、产物简单）可跳过独立复核",
+    ):
+        check(kw in adv_ref, f"references/advanced.md missing keyword: {kw}")
+
+
+def test_r1_a003_distinguishes_status_vs_agents() -> None:
+    """Item 7: A003 message distinguishes STATUS overflow (archive_status.py) vs AGENTS overflow (§3.5)."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        base_agents = (line / "AGENTS.md").read_text(encoding="utf-8")
+        big_table = "".join(f"| D-{i:03d} | {'决策内容填充' * 40} |\n" for i in range(1, 140))
+        write(
+            line / "AGENTS.md",
+            base_agents.replace("| ID | 决策 |\n|---|---|\n", "| ID | 决策 |\n|---|---|\n" + big_table),
+        )
+        check(len((line / "AGENTS.md").read_bytes()) > 25_000, "fixture AGENTS.md must exceed 25KB")
+        rc, out = run(line)
+        check(
+            rc == 0 and "[A003] ⚠️" in out and "AGENTS 超限多半在 §3.5" in out and "决策登记表_全文.md" in out,
+            "AGENTS-only A003 warning must point to §3.5 migration:\n" + out,
+        )
+        check("STATUS 超限" not in out, "AGENTS-only overflow must not print STATUS 超限:\n" + out)
+
+
 def main() -> int:
     test_asset_sizes()
     with tempfile.TemporaryDirectory() as temp:
@@ -387,6 +589,12 @@ def main() -> int:
         check("[H007] ❌" in out, "retired pointer must fail:\n" + out)
 
     test_040_features()
+    test_r1_a007_merged_inline_states()
+    test_r1_index_template_no_collision()
+    test_r1_a005_skips_closed_and_deprecated()
+    test_r1_h004_prose_vs_template_placeholders()
+    test_r1_asset_keywords_and_restored_refs()
+    test_r1_a003_distinguishes_status_vs_agents()
     print("All skill self-tests passed.")
     return 0
 

@@ -2,11 +2,12 @@
 
 ## 0.4.0 — 2026-11-10
 
-- 新增 `assets/archive_status.py`：一键保留 `STATUS.md` 最近 N 段（默认 10）交接与 `AGENTS.md` §3 最近 5 条快照，其余原样迁入 `文档/*_归档_至<日期>.md` 并在入口留 `>` 引用；`check_handoff.py` A003 超限时直接提示该命令。
+- 新增 `assets/archive_status.py`：一键保留 `STATUS.md` 最近 N 段（默认 10）交接与 `AGENTS.md` §3 最近 5 条快照，其余原样迁入 `文档/*_归档_至<日期>.md` 并在入口留 `>` 引用；`check_handoff.py` A003 超限时区分 `STATUS` 超限（跑 `archive_status.py`）与 `AGENTS` 超限（多半在 §3.5 决策表，按规矩迁全文）。
 - `assets/STATUS.md` 交接段改为“谁做的”一行＋四节（`改了什么 / 怎么验证的 / 没做什么 / 不确定处`），整段 ≤800 字；`check_handoff.py` 新增 A011（最新交接段 ≤800 字且四节齐）、A012（复核报告末尾单独一行 `PASS` 或 `NEEDS_FIX`），A006 超 15KB 时列出最大三节与字节数；全部新检查只提示不阻断。
+- `check_handoff.py` 修正三处误报/漏检：A007 支持 §4 一行合并多卡并按各卡内联状态符号逐卡比对（含 `T12a/b` 斜杠简写与依赖括号屏蔽）；A005 跳过已收口（`✅`）与作废（`🗄️`）卡，只查在用卡提示词；H004 只将模板原样占位（`【待填】`、未改模板句、空值行）判为未填，不再误杀正文里的“例：”“e.g.”“TODO”；`assets/任务卡_README.md` 索引示例行改用 `Tx`/`Ty`/`Tz`，避免新骨架首跑撞真实 `T1` 卡。
 - `assets/任务卡_README.md` 与 `assets/任务规划_模板.md` 更新五条执行规矩：复核意见分“会出错（须写出错场景）/ 建议”两节且只按“会出错”返工；核查类卡不替复核方划范围（冷读不读“主控在立项前看过什么”，先用脚本自列全量清单）；闸门必须用脚本重开最终交付物本身；计数和派生数一律由脚本算出（写作卡只取权威层已有的数）；主控收口三查。
 - 新增可选资产 `assets/环境坑.md`（现象 / 原因 / 解法 / 出处卡号单一来源），`assets/AGENTS.md` §7 加指针；`assets/经验教训.md` 补第 9、10 条。
-- `references/advanced.md` 新增可选进阶：模型战绩表（`文档/模型战绩.csv`）与卡头“任务契约”四行；`SKILL.md` 瘦身至 ≤15KB，安装说明与并列多线课题分别移入 `references/install.md`、`references/multi_line.md`，标准委派话术移入 `references/advanced.md`；`tests/test_skill.py` 补齐通过与不通过测试样例。
+- `references/advanced.md` 新增可选进阶：模型战绩表（`文档/模型战绩.csv`）与卡头“任务契约”四行；`SKILL.md` 瘦身至 ≤15KB，安装说明与并列多线课题分别移入 `references/install.md`、`references/multi_line.md`，标准委派话术移入 `references/advanced.md`；`tests/test_skill.py` 补齐脚本回归测试与关键模板资产关键词断言。
 
 ## 0.3.8 — 2026-10-26
 

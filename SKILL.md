@@ -27,7 +27,7 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 1. **先读后问**：先读项目已有 README、目录、文档与代码；能推断的给合理默认值并标注“默认值，可改”，只一次性问用户特有且无法推断的信息（项目根、是否多线、一句话目标、兼容工具、是否云同步盘、数据源）。
 2. **问清“不可混用的维度”**：把本领域绝对不能混用的口径/单位/坐标系/分辨率/时期写成 §5 硬规则。
 3. **建入口**：**单线项目**从 `assets/AGENTS.md` 复制；**多线项目**从 `assets/ROOT_AGENTS.md` 复制根索引，并为每条线复制 `assets/AGENTS.md`（多线四条规矩与冷启动顺序见 [`references/multi_line.md`](references/multi_line.md)）。未知且无法推断的字段留 `【待填】`，已给或可推断的直接填入真实日期与内容。
-4. **复制薄指针**：按用户勾选的工具复制 `assets/CLAUDE.md`、`assets/GEMINI.md`、`.cursor/rules/multi-agent.mdc`（`assets/multi-agent.mdc`）或 `.github/copilot-instructions.md`，统一指向当前 scope 根 `AGENTS.md`（位于 `.github/` 或 `.cursor/rules/` 时仍指向上级 scope 根，不指向配置子目录）。未勾选的工具不生成；原生读取 `AGENTS.md` 的 Codex/ZCode 可不额外生成薄指针。
+4. **复制薄指针**：按用户勾选的工具复制 `assets/CLAUDE.md` → `CLAUDE.md`、`assets/GEMINI.md` → `GEMINI.md`、`assets/multi-agent.mdc` → `.cursor/rules/multi-agent.mdc` 或 `assets/copilot-instructions.md` → `.github/copilot-instructions.md`，统一指向当前 scope 根 `AGENTS.md`（位于 `.github/` 或 `.cursor/rules/` 时仍指向上级 scope 根，不指向配置子目录）。未勾选的工具不生成；原生读取 `AGENTS.md` 的 Codex/ZCode 可不额外生成薄指针。
 5. **建任务卡与索引**：新建 `文档/任务卡/T1_<主题>.md`（照 `assets/任务规划_模板.md`；已有项目可暂留平铺旧卡，迁移前先审计引用；建议模型不是实际运行身份），并复制 `assets/任务卡_README.md` 到 `文档/任务卡_README.md`（单卡项目也必拷）。🔴 **一个任务一张卡**（执行与独立复核同卡双提示词）；卡面规矩（谁改哪里、自由度、停止条件、冷读与两节式复核、核查不划范围、闸门查交付物本身、计数用脚本、主控收口三查、体积线）只写在 `任务卡_README.md`，此处不重复。多树/迁移场景另拷 `assets/迁移协议.md`、`assets/经验教训.md`。
 6. **可选专题文件**：有软件/环境坑时拷 `assets/环境坑.md` → `文档/环境坑.md`（单一来源）；按需建 `文档/决策记录/`、`文档/词汇表.md`（进阶板块见 [`references/advanced.md`](references/advanced.md)）。已完成且不再读的文档可标“已归档”节省认知负荷。
 7. **数据集溯源**：每类数据目录放 `来源.txt`（从 `assets/来源.txt` 复制）；无明确数据源可跳过。
@@ -36,7 +36,7 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
    - 一键归档：`STATUS.md` >40KB 或 `AGENTS.md` §3 >5 条时，跑 `python scripts/archive_status.py` 保留最近 N 段（默认 10）交接与 §3 最近 5 条快照，其余原样迁入 `文档/*_归档_至<日期>.md` 并在入口留一行 `>` 引用（不要写成带日期的 `#` 标题）。
 9. **建 `STATUS.md`**：从 `assets/STATUS.md` 复制；首次建骨架即可填入建项当日的初始化交接段（“谁做的”一行＋四节：改了什么 / 怎么验证的 / 没做什么 / 不确定处，≤800 字，去掉 `YYYY-MM-DD` 占位符）。
 10. **写入约束**：把环境路径、行为红线、工作盘分流分别填入线级 §7、§5、§5.5。
-11. **验证交回**：运行 `python scripts/check_handoff.py`（若保留了 `【待填】`/`YYYY-MM-DD` 占位符，H003–H005 会提示待填项；填妥当日初始状态后应全绿）与 `python scripts/archive_status.py --dry-run`，告知用户已生成的文件、默认值和待确认项。
+11. **验证交回**：运行 `python scripts/check_handoff.py`（若保留了 `【待填】`/`YYYY-MM-DD` 占位符，H003–H005 会提示待填项；填妥当日初始状态后应全绿）与 `python scripts/archive_status.py --dry-run`（新骨架仅用 `--dry-run` 验证脚本能跑，日后收到 A003 `STATUS` 超限或 A008 §3 超限提示时再去掉 `--dry-run` 正式归档），告知用户已生成的文件、默认值和待确认项。
 
 ### 模式 B：诊断已有项目
 
