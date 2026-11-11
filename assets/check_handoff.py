@@ -17,8 +17,8 @@
   H004 TL;DR 已填（不是模板占位符）
   H005 STATUS.md 存在、非模板、有真实日期（仅在标题、“现状”行、字段占位等模板位置判未填）
   H006 STATUS 最新交接日期 >= §3 最近日期
-       （交接标题支持 ## 或 ###，须含 Handoff/交接，或以日期 / T<卡号>+日期 开头；“交回说明”等不算交接；
-        日期支持 YYYY-MM-DD、YYYY/MM/DD、YYYY.MM.DD、YYYY年MM月DD日）
+       （交接标题仅认 ## 或 ###，#### 及更深标题不算；须含 Handoff/交接，或以日期 / T<卡号>+日期 开头；
+        “交回说明”等不算交接；日期支持 YYYY-MM-DD、YYYY/MM/DD、YYYY.MM.DD、YYYY年MM月DD日）
   H007 至少一个薄指针指向 AGENTS.md（没有薄指针也算通过）
   H008 §4 看板存在且有真实任务行（仅含模板占位行不算）
   H009 TL;DR 日期与 §3 不矛盾（任一方没日期则跳过）
@@ -29,7 +29,7 @@
        A004 §4 看板至少勾了一项（模板占位行不算）
        A005 在用任务卡同时带执行方和独立复核方派发提示词（跳过 ✅/🗄️）
        A006 在用任务卡 ≤15KB、提示词段 ≤3（超限时列最大三节；跳过 ✅/🗄️）
-       A007 卡面状态与 §4 看板／任务卡索引一致（只比收口与否，支持一行多卡内联状态）
+       A007 卡面状态与 §4 看板／任务卡索引一致（状态行顶格写；只比收口与否，支持一行多卡内联状态）
        A008 §3 ≤5 条、不挂已收口卡的“待审查”
        A009 在用任务卡“进度回写”单行 ≤400 字（跳过 ✅/🗄️）
        A010 §3 单条 ≤600 字（顶层列表项连同缩进续行）
@@ -74,8 +74,17 @@ DATE_PLACEHOLDER_RE = re.compile(r"YYYY[-/.]MM[-/.]DD|YYYY\s*年\s*MM\s*月\s*DD
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 PROMPT_HEAD_RE = re.compile(r"(?m)^#{1,6}\s.*(?:📋|提示词).*$")
 STATE_RE = re.compile(r"🟠|⬜|⏳|🟡|🔵|✅|⛔|🗄")
-CARD_STATE_LINE_RE = re.compile(r"(?m)^\s*>?\s*(?:[-*+]\s+)?\**状态\**\s*[:：]\**(.*)$")
+CARD_STATE_LINE_RE = re.compile(r"(?m)^(?:[-*+][ \t]+)?\**状态\**[ \t]*[:：]\**(.*)$")
 CLOSED = ("✅", "🗄")
+PLACEHOLDER_SPAN_RE = re.compile(
+    r"【\s*(?:待填|TODO|fill)(?:[^【】\n]|【[^【】\n]*】)*】"
+    r"|【[^【】\n]*TODO\s*】"
+    r"|\[\s*(?:待填|TODO|fill)\b(?:[^\[\]\n]|\[[^\[\]\n]*\])*\]"
+    r"|<\s*(?:待填|TODO|fill)\b(?:[^<>\n]|<[^<>\n]*>)*>"
+    r"|YYYY[-/.]MM[-/.]DD"
+    r"|YYYY\s*年\s*MM\s*月\s*DD\s*日",
+    re.I,
+)
 PLACEHOLDER_RE = re.compile(
     r"【待填|【TODO|TODO】|\[TODO\b|<TODO\b|YYYY-MM-DD|<fill|\[fill|<待填|\[待填"
     r"|例\s*T3\s*进行中"
@@ -84,6 +93,17 @@ PLACEHOLDER_RE = re.compile(
     r"|e\.g\.\s*T3\s+in\s+progress"
     r"|first\s+action,\s*precise\s+to\s+file/command"
     r"|None\s*/\s*waiting\s+for\s+user\s+to\s+confirm\s+X",
+    re.I,
+)
+STATUS_TEMPLATE_PROMPT_RE = re.compile(
+    r"工具【】\s*/\s*模型【】"
+    r"|【新增/修改/删除了哪些文件"
+    r"|【跑过的命令与结果原文摘要"
+    r"|【明确未做项"
+    r"|【风险、UNKNOWN"
+    r"|【3\s*行描述当前阶段】"
+    r"|【只写本轮必须交接的数字"
+    r"|【1\s*行当前依赖/阻塞",
     re.I,
 )
 STATUS_FIELD_PLACEHOLDER_RE = re.compile(
@@ -170,6 +190,56 @@ def strip_fenced(text: str) -> str:
     lines = text.splitlines()
     keep = unfenced_indices(lines)
     return "\n".join(ln for i, ln in enumerate(lines) if i in keep)
+
+
+def strip_placeholder_spans(text: str) -> str:
+    """Remove inline placeholder spans (e.g. 【待填：...】, [TODO: ...], YYYY-MM-DD) while keeping surrounding text."""
+    return PLACEHOLDER_SPAN_RE.sub(" ", text)
+
+
+def strip_fenced_and_html_comments(text: str) -> str:
+    """Strip fenced code blocks and HTML comments (including multiline <!-- ... -->) in a single pass."""
+    out_lines: list[str] = []
+    fence_char, fence_len = "", 0
+    in_comment = False
+
+    def _clean_normal_segment(seg: str) -> tuple[str, bool]:
+        buf: list[str] = []
+        pos = 0
+        while True:
+            idx = seg.find("<!--", pos)
+            if idx == -1:
+                buf.append(seg[pos:])
+                return "".join(buf), False
+            buf.append(seg[pos:idx])
+            end_idx = seg.find("-->", idx + 4)
+            if end_idx == -1:
+                buf.append(" ")
+                return "".join(buf), True
+            buf.append(" ")
+            pos = end_idx + 3
+
+    for ln in text.splitlines():
+        if fence_char:
+            m = FENCE_RE.match(ln)
+            if m and m.group(1)[0] == fence_char and len(m.group(1)) >= fence_len and not m.group(2).strip():
+                fence_char, fence_len = "", 0
+            continue
+        if in_comment:
+            end_idx = ln.find("-->")
+            if end_idx == -1:
+                continue
+            cleaned_tail, in_comment = _clean_normal_segment(ln[end_idx + 3 :])
+            out_lines.append(" " + cleaned_tail)
+            continue
+        m = FENCE_RE.match(ln)
+        if m and (m.group(1)[0] == "~" or "`" not in m.group(2)):
+            fence_char, fence_len = m.group(1)[0], len(m.group(1))
+            continue
+        cleaned_ln, in_comment = _clean_normal_segment(ln)
+        out_lines.append(cleaned_ln)
+
+    return "\n".join(out_lines)
 
 
 def scan_dates(text: str) -> tuple[list[date], list[str]]:
@@ -288,6 +358,15 @@ def is_template_task_line(line: str) -> bool:
     return False
 
 
+def _is_unfilled_placeholder_value(val: str) -> bool:
+    """True when a non-empty field value is still a template prompt or consists solely of placeholder spans."""
+    if not val:
+        return False
+    if STATUS_TEMPLATE_PROMPT_RE.search(val):
+        return True
+    return not strip_placeholder_spans(val).strip(" \t—–-:：;；,，。/|.·()（）[]【】<>")
+
+
 def check_status_h005(status: str, today: date) -> tuple[bool, str]:
     if not status.strip():
         return False, "STATUS.md 不存在或为空"
@@ -319,7 +398,7 @@ def check_status_h005(status: str, today: date) -> tuple[bool, str]:
             has_real_date = bool(scan_dates(no_code)[0])
             if DATE_PLACEHOLDER_RE.search(no_code) and not has_real_date:
                 reasons.append(f"标题仍含日期占位符「{hm.group(2).strip()[:28]}」")
-            elif STATUS_FIELD_PLACEHOLDER_RE.search(no_code):
+            elif STATUS_FIELD_PLACEHOLDER_RE.search(no_code) and not has_real_date:
                 reasons.append(f"标题仍含模板占位符「{hm.group(2).strip()[:28]}」")
             continue
 
@@ -329,7 +408,7 @@ def check_status_h005(status: str, today: date) -> tuple[bool, str]:
         )
         if snap_m:
             val = re.sub(r"`[^`]*`", "", snap_m.group(2)).strip()
-            if not val or DATE_PLACEHOLDER_RE.search(val) or STATUS_FIELD_PLACEHOLDER_RE.search(val):
+            if not val or _is_unfilled_placeholder_value(val):
                 reasons.append(f"“现状”行「{snap_m.group(1)}」仍为占位符或未填")
             continue
 
@@ -343,7 +422,7 @@ def check_status_h005(status: str, today: date) -> tuple[bool, str]:
         )
         if fld_m:
             raw_val = re.sub(r"`[^`]*`", "", fld_m.group(2)).strip()
-            if DATE_PLACEHOLDER_RE.fullmatch(raw_val) or STATUS_FIELD_PLACEHOLDER_RE.search(raw_val):
+            if _is_unfilled_placeholder_value(raw_val):
                 reasons.append(f"交接字段「{fld_m.group(1)}」仍含模板占位符")
 
     if not reasons:
@@ -640,11 +719,11 @@ def line_checks(root: Path, days: int, today: date) -> None:
     add("H002", "线级入口未声明为根索引", not declared_index, "请改用 --scope index" if declared_index else "line scope")
 
     sec3_unfenced = strip_fenced(section(agents, "3", {"现在在哪", "Where We Are Now"}))
-    sec3_body_lines = sec3_unfenced.splitlines()[1:] if sec3_unfenced else []
-    sec3_has_placeholder = any("【待填" in ln or PLACEHOLDER_RE.search(ln) for ln in sec3_body_lines)
-    sec3_real_text = "\n".join(
-        ln for ln in sec3_body_lines if not ("【待填" in ln or PLACEHOLDER_RE.search(ln))
+    sec3_lines = sec3_unfenced.splitlines() if sec3_unfenced else []
+    sec3_has_placeholder = any(
+        PLACEHOLDER_SPAN_RE.search(ln) or PLACEHOLDER_RE.search(ln) for ln in sec3_lines
     )
+    sec3_real_text = strip_placeholder_spans("\n".join(sec3_lines))
     sec3_date = latest(sec3_real_text, today)
     sec3_is_placeholder = sec3_date is None and sec3_has_placeholder
     sec3_missing_msg = "§3 还是模板占位" if sec3_is_placeholder else "§3 没有有效日期"
@@ -728,9 +807,7 @@ def line_checks(root: Path, days: int, today: date) -> None:
     )
     add("H008", "§4 看板存在且有任务行", bool(real_box_lines), h008_detail)
 
-    tldr_real_lines = "\n".join(
-        ln for ln in strip_fenced(tldr).splitlines() if not ("【待填" in ln or PLACEHOLDER_RE.search(ln))
-    )
+    tldr_real_lines = strip_placeholder_spans(strip_fenced(tldr))
     tldr_date = latest(tldr_real_lines, today)
     conflict = bool(tldr_date and sec3_date and tldr_date < sec3_date - timedelta(days=1))
     h009_rhs = f"§3 {sec3_date}" if sec3_date else (sec3_missing_msg if sec3_is_placeholder else "§3 None")
@@ -906,7 +983,7 @@ def advisories(root: Path, agents: str, status: str, sec4: str, blocks: list[str
 
     if not blocks:
         add("A011", "STATUS 最近 5 段交接 ≤800 字且四节齐", False,
-            "未找到交接段（## 或 ### 标题须含 Handoff/交接，或以日期 / T<卡号>+日期 开头；“交回说明”等不算交接）", True)
+            "未找到交接段（仅认 ## 或 ### 标题，#### 及更深标题不算；须含 Handoff/交接，或以日期 / T<卡号>+日期 开头；“交回说明”等不算交接）", True)
     else:
         d_first = latest(blocks[0].splitlines()[0], today) or latest(blocks[0], today)
         d_last = latest(blocks[-1].splitlines()[0], today) or latest(blocks[-1], today)
@@ -1103,21 +1180,21 @@ def sec4_card_drifts(sec4: str, states: dict[str, tuple[str, str]]) -> list[str]
 
 
 def progress_section_unfenced(text: str) -> str:
-    """Return unfenced lines inside the '## 进度回写' section of a task card."""
-    lines = text.splitlines()
-    unfenced = unfenced_indices(lines)
+    """Return unfenced, uncommented lines inside the '## 进度回写' section of a task card."""
+    cleaned = strip_fenced_and_html_comments(text)
+    lines = cleaned.splitlines()
     start: Optional[int] = None
-    for i in sorted(unfenced):
-        if re.match(r"^##\s*进度回写", lines[i]):
+    for i, ln in enumerate(lines):
+        if re.match(r"^##\s*进度回写", ln):
             start = i
             break
     if start is None:
         return ""
     end = next(
-        (j for j in range(start + 1, len(lines)) if j in unfenced and lines[j].startswith("## ")),
+        (j for j in range(start + 1, len(lines)) if lines[j].startswith("## ")),
         len(lines),
     )
-    return "\n".join(lines[j] for j in range(start + 1, end) if j in unfenced)
+    return "\n".join(lines[start + 1 : end])
 
 
 def single_card_state(text: str) -> Optional[str]:

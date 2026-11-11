@@ -11,8 +11,8 @@
 行为：
   - STATUS.md：交接段数 > --keep（默认 10）时，保留最近 N 段，其余原样移到
     文档/STATUS_归档_至<日期>.md（同日归档文件已存在则追加），并在入口头部留一行 `>` 引用。
-    （交接标题支持 `##` 或 `###`，须含 `Handoff`/`交接`，或以日期 / `T<卡号>+日期` 开头；“交回说明”等不算交接；
-     日期支持 YYYY-MM-DD、YYYY/MM/DD、YYYY.MM.DD、YYYY年MM月DD日。）
+    （交接标题仅支持 `##` 或 `###`，`####` 及更深标题不算；须含 `Handoff`/`交接`，或以日期 / `T<卡号>+日期` 开头；
+     “交回说明”等不算交接；日期支持 YYYY-MM-DD、YYYY/MM/DD、YYYY.MM.DD、YYYY年MM月DD日。）
   - AGENTS.md：§3 可归档快照条数 > --agents-keep（默认 5）时，保留最近 M 条（保留“阻塞”与 `→` 指针行），
     其余原样移到 文档/AGENTS_归档_至<日期>.md，并在 §3 留一行 `>` 引用。
     （若 AGENTS.md 超 25KB 是因 §3.5 决策登记表过长，需按 §3.5 规矩手动迁出全文，本脚本不拆决策表。）
@@ -122,6 +122,16 @@ def is_handoff_title(title: str) -> bool:
     )
 
 
+def _trim_blank_lines(ls: list[str]) -> str:
+    s = 0
+    e = len(ls)
+    while s < e and not ls[s].strip():
+        s += 1
+    while e > s and not ls[e - 1].strip():
+        e -= 1
+    return "\n".join(ls[s:e])
+
+
 def _parse_status_with_gaps(text: str) -> tuple[list[str], list[str], list[str], list[str]]:
     """Split STATUS.md into (preamble_lines, handoff_blocks, gaps_before_each_block, postamble_lines)."""
     lines = text.splitlines()
@@ -148,7 +158,7 @@ def _parse_status_with_gaps(text: str) -> tuple[list[str], list[str], list[str],
     postamble: list[str] = []
     prev_end = first_start
     for idx, (start, cur_lvl, _) in enumerate(handoff_heads):
-        gap_str = "\n".join(lines[prev_end:start]).strip() if idx > 0 else ""
+        gap_str = _trim_blank_lines(lines[prev_end:start]) if idx > 0 else ""
         gaps.append(gap_str)
         next_end = next(
             (
@@ -173,7 +183,7 @@ def _parse_status_with_gaps(text: str) -> tuple[list[str], list[str], list[str],
                 while seg_lines and not seg_lines[-1].strip():
                     seg_lines.pop()
             postamble = list(reversed(footer_tmp)) + trailing_non_handoff
-        blocks.append("\n".join(seg_lines).strip())
+        blocks.append(_trim_blank_lines(seg_lines))
         prev_end = next_end
     return preamble, blocks, gaps, postamble
 
@@ -209,7 +219,7 @@ def append_or_create_archive(
     arch_path: Path, header_title: str, header_note: str, body: str, default_eol: str
 ) -> None:
     arch_path.parent.mkdir(parents=True, exist_ok=True)
-    chunk = body.strip() + "\n"
+    chunk = body.strip("\r\n").rstrip() + "\n"
     if arch_path.is_file() and arch_path.stat().st_size > 0:
         existing_raw, arch_eol = read_utf8_and_eol(arch_path)
         existing = existing_raw.rstrip()
@@ -245,6 +255,12 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
         kept_indices = list(range(total - keep, total))
 
     to_archive = [blocks[i] for i in arch_indices]
+    arch_chunks: list[str] = []
+    for ai in arch_indices:
+        if gaps[ai]:
+            arch_chunks.append(gaps[ai])
+        arch_chunks.append(blocks[ai])
+
     kept_chunks: list[str] = []
     first_kept = kept_indices[0]
     if first_kept > 0 and not gaps[first_kept] and blocks[first_kept].startswith("### "):
@@ -273,8 +289,9 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
         ref_rel=rel_arch,
     )
     parts = ["\n".join(new_preamble).rstrip(), "\n\n".join(kept_chunks)]
-    if postamble and "\n".join(postamble).strip():
-        parts.append("\n".join(postamble).strip())
+    post_str = _trim_blank_lines(postamble) if postamble else ""
+    if post_str:
+        parts.append(post_str)
     new_status_lf = "\n\n".join(p for p in parts if p) + "\n"
     new_status_final = new_status_lf.replace("\n", "\r\n") if status_eol == "\r\n" else new_status_lf
     after_bytes = len(new_status_final.encode("utf-8"))
@@ -290,7 +307,7 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Op
         arch_path,
         header_title=f"STATUS 归档（原样迁出，至 {arch_date_str}）",
         header_note="自 `STATUS.md` 原样移出的旧交接段，只作历史查阅；当前状态以 `AGENTS.md` §3 与 `STATUS.md` 为准。",
-        body="\n\n".join(to_archive),
+        body="\n\n".join(arch_chunks),
         default_eol=status_eol,
     )
     write_with_eol(status_path, new_status_lf, status_eol)

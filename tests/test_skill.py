@@ -1409,6 +1409,358 @@ def test_041_s10_index_template_a011_recent_five() -> None:
     )
 
 
+def test_041_r2_s1_sec3_heading_date_counted() -> None:
+    """R2-S1: Date on the '## 3' heading line is counted toward §3 date (fixing R1 [1:] regression)."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(
+            line / "STATUS.md",
+            "# STATUS\n\n## Handoff（2026-11-11，最新交接）\n"
+            "- **谁做的**：主控\n- **改了什么**：跟进。\n- **怎么验证的**：通过。\n- **没做什么**：无。\n- **不确定处**：无。\n",
+        )
+        # Exact R1 bug scenario: heading has 2026-11-10, body latest is 2026-10-01, STATUS is 2026-11-11
+        agents_s1 = (
+            "# AGENTS\n\n> **Scope: line**\n\n> ⚡ **TL;DR**\n"
+            "> - **当前阶段**：收口中（2026-11-10）\n> - **下一步**：复查\n> - **阻塞**：无\n\n"
+            "## 3. 现在在哪（截至 2026-11-10）\n"
+            "- ✅ 2026-10-01：底座完成\n\n"
+            "## 3.5 决策登记表\n| ID | 决策 |\n|---|---|\n\n"
+            "## 4. 任务看板\n- [x] T1 初稿\n"
+        )
+        write(line / "AGENTS.md", agents_s1)
+        res = subprocess.run(
+            [sys.executable, "-B", str(CHECKER), str(line), "--today", "2026-11-11"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(
+            res.returncode == 0 and "[H003] ✅" in res.stdout and "§3 2026-11-10" in res.stdout and "[H006] ✅" in res.stdout,
+            "§3 heading date 2026-11-10 must be counted and pass H003/H006:\n" + res.stdout,
+        )
+
+        # Similar variant 1: '## 3 现在在哪（2026/11/10 更新）' (no dot, slash date) and no date in body bullets
+        agents_s1_var = agents_s1.replace(
+            "## 3. 现在在哪（截至 2026-11-10）\n- ✅ 2026-10-01：底座完成",
+            "## 3 现在在哪（2026/11/10 更新）\n- ✅ 底座已完成（详见主表）",
+        )
+        write(line / "AGENTS.md", agents_s1_var)
+        res_var = subprocess.run(
+            [sys.executable, "-B", str(CHECKER), str(line), "--today", "2026-11-11"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(
+            res_var.returncode == 0 and "[H003] ✅" in res_var.stdout and "§3 2026-11-10" in res_var.stdout,
+            "slash date in '## 3 现在在哪（2026/11/10 更新）' without body dates must pass H003:\n" + res_var.stdout,
+        )
+
+        # Similar variant 2: placeholder date inside heading '## 3. 现在在哪（【待填：截至 2026-11-10】）' must NOT count
+        agents_s1_ph = agents_s1.replace(
+            "## 3. 现在在哪（截至 2026-11-10）\n- ✅ 2026-10-01：底座完成",
+            "## 3. 现在在哪（【待填：截至 2026-11-10】）\n- ✅ 【待填：最近完成的事】",
+        )
+        write(line / "AGENTS.md", agents_s1_ph)
+        res_ph = subprocess.run(
+            [sys.executable, "-B", str(CHECKER), str(line), "--today", "2026-11-11"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(
+            res_ph.returncode == 1 and "[H003] ❌" in res_ph.stdout and "§3 还是模板占位" in res_ph.stdout,
+            "placeholder date inside §3 heading must still be stripped:\n" + res_ph.stdout,
+        )
+
+
+def test_041_r2_s2_inline_placeholder_span_stripping() -> None:
+    """R2-S2: Strip only placeholder spans (【待填…】, YYYY-MM-DD, etc.) instead of whole line in §3 and TL;DR."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(
+            line / "STATUS.md",
+            "# STATUS\n\n## Handoff（2026-11-11，最新交接）\n"
+            "- **谁做的**：主控\n- **改了什么**：跟进。\n- **怎么验证的**：通过。\n- **没做什么**：无。\n- **不确定处**：无。\n",
+        )
+
+        def _make_agents(tldr_lines: str, sec3_lines: str) -> str:
+            return (
+                f"# AGENTS\n\n> **Scope: line**\n\n> ⚡ **TL;DR**\n{tldr_lines}\n\n"
+                f"## 3. 现在在哪\n{sec3_lines}\n\n"
+                "## 3.5 决策登记表\n| ID | 决策 |\n|---|---|\n\n"
+                "## 4. 任务看板\n- [x] T1 初稿\n"
+            )
+
+        clean_tldr = "> - **当前阶段**：交付中（2026-11-10）\n> - **下一步**：收口\n> - **阻塞**：无"
+
+        # Exact R1 bug scenario a: real date + inline 【待填：页数】 on the same §3 line
+        write(
+            line / "AGENTS.md",
+            _make_agents(
+                clean_tldr,
+                "- ✅ 2026-10-01：底座完成\n- 🔶 交付（2026-11-10）：报告已发【待填：页数】",
+            ),
+        )
+        res_a = subprocess.run(
+            [sys.executable, "-B", str(CHECKER), str(line), "--today", "2026-11-11"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(
+            res_a.returncode == 0 and "[H003] ✅" in res_a.stdout and "§3 2026-11-10" in res_a.stdout,
+            "real date 2026-11-10 sharing line with 【待填：页数】 must be counted in §3:\n" + res_a.stdout,
+        )
+
+        # Exact R1 bug scenario b: real date + literal YYYY-MM-DD on the same §3 line
+        write(
+            line / "AGENTS.md",
+            _make_agents(
+                clean_tldr,
+                "- ✅ 2026-10-01：底座完成\n- ✅ 2026-11-10：规定日期写 YYYY-MM-DD 格式",
+            ),
+        )
+        res_b = subprocess.run(
+            [sys.executable, "-B", str(CHECKER), str(line), "--today", "2026-11-11"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(
+            res_b.returncode == 0 and "[H003] ✅" in res_b.stdout and "§3 2026-11-10" in res_b.stdout,
+            "real date 2026-11-10 sharing line with literal YYYY-MM-DD must be counted in §3:\n" + res_b.stdout,
+        )
+
+        # Similar variant 1: same line has real 2026-11-10 AND newer example date inside 【待填：…】 / [TODO: …]
+        write(
+            line / "AGENTS.md",
+            _make_agents(
+                clean_tldr,
+                "- ✅ 2026-10-01：底座\n- 🔶 交付（2026-11-10）：已发【待填：例 2026-11-14 补表】 [TODO: 2026/11/15 核对]",
+            ),
+        )
+        res_c = subprocess.run(
+            [sys.executable, "-B", str(CHECKER), str(line), "--today", "2026-11-15"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(
+            res_c.returncode == 0 and "[H003] ✅" in res_c.stdout and "[H006] ✅" in res_c.stdout and "§3 2026-11-10" in res_c.stdout,
+            "placeholder dates on the same line must be stripped while keeping real 2026-11-10:\n" + res_c.stdout,
+        )
+
+        # Similar variant 2: TL;DR line has real 2026-11-10 alongside literal YYYY-MM-DD / 【待填：页数】 (check H009 uses 2026-11-10, not older 2026-10-01)
+        tldr_mixed = (
+            "> - **当前阶段**：底座（2026-10-01）\n"
+            "> - **下一步**：2026-11-10 交付件按 YYYY-MM-DD 归档【待填：页数】\n"
+            "> - **阻塞**：无"
+        )
+        write(line / "AGENTS.md", _make_agents(tldr_mixed, "- ✅ 2026-11-10：交付完成"))
+        res_d = subprocess.run(
+            [sys.executable, "-B", str(CHECKER), str(line), "--today", "2026-11-11"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(
+            "[H009] ✅" in res_d.stdout and "TL;DR 2026-11-10 vs §3 2026-11-10" in res_d.stdout,
+            "TL;DR date extraction must also strip only placeholder spans and keep 2026-11-10 for H009:\n" + res_d.stdout,
+        )
+
+        # Similar variant 3: quoted unclosed “【待填” in §3 prose + real project STATUS prose mentioning 【待填】
+        write(line / "AGENTS.md", _make_agents(clean_tldr, "- ✅ 排除“【待填”前缀误伤（2026-11-10）"))
+        write(
+            line / "STATUS.md",
+            "# STATUS\n\n## Handoff（2026-11-11，T13c 复查）\n"
+            "- **谁做的**：复核方\n"
+            "- **改了什么**：修复把与【待填】同行的真实日期丢弃的问题。\n"
+            "- **怎么验证的**：真实日期与【待填】同行用例通过。\n"
+            "- **没做什么**：无。\n"
+            "- **不确定处**：带【待填】行的口径已明确。\n",
+        )
+        res_e = subprocess.run(
+            [sys.executable, "-B", str(CHECKER), str(line), "--today", "2026-11-11"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(
+            res_e.returncode == 0 and "[H003] ✅" in res_e.stdout and "[H005] ✅" in res_e.stdout,
+            "quoted unclosed 【待填 in §3 and prose mentioning 【待填】 in STATUS fields must pass H003 & H005:\n" + res_e.stdout,
+        )
+
+
+def test_041_r2_s3_top_level_card_state_and_html_comments() -> None:
+    """R2-S3: Card state strips fenced blocks and <!-- --> comments, then matches only unindented top-level 状态 line; rules document '状态行顶格写'."""
+    readme_tpl = (REPO / "assets" / "任务卡_README.md").read_text(encoding="utf-8")
+    rules_sec = readme_tpl.split("## 卡面规矩", 1)[1].split("## 例行签核提示词", 1)[0]
+    check("状态行顶格写" in rules_sec, "assets/任务卡_README.md 卡面规矩 must state '状态行顶格写'")
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        cards_dir = line / "文档" / "任务卡"
+        write(cards_dir / "T1_初稿.md", "# T1\n\n## 进度回写\n- 状态：✅已收口\n")
+
+        # Exact R1 bug scenario 1: 4-space indented code block with '- 状态：✅已收口' before real top-level '- 状态：⬜可派'
+        write(
+            cards_dir / "T2_方法.md",
+            "# T2 方法\n\n## 进度回写\n"
+            "示例写法：\n\n"
+            "    - 状态：✅已收口\n\n"
+            "- 状态：⬜可派\n\n"
+            "## 📋 执行方派发提示词\n做\n\n## 📋 独立复核方派发提示词\n核\n",
+        )
+        rc1, out1 = run(line)
+        check(
+            rc1 == 0 and "[A007] ✅" in out1 and "1 张在用卡" in out1,
+            "4-space indented example '- 状态：✅已收口' must be ignored so card stays ⬜:\n" + out1,
+        )
+
+        # Exact R1 bug scenario 2: multiline HTML comment '<!--\n- 状态：✅已收口\n-->' before real '- 状态：⬜可派'
+        write(
+            cards_dir / "T2_方法.md",
+            "# T2 方法\n\n## 进度回写\n"
+            "<!--\n- 状态：✅已收口\n-->\n"
+            "- 状态：⬜可派\n\n"
+            "## 📋 执行方派发提示词\n做\n\n## 📋 独立复核方派发提示词\n核\n",
+        )
+        rc2, out2 = run(line)
+        check(
+            rc2 == 0 and "[A007] ✅" in out2 and "1 张在用卡" in out2,
+            "multiline HTML comment '<!-- - 状态：✅已收口 -->' must be ignored so card stays ⬜:\n" + out2,
+        )
+
+        # Similar variant 1: 2-space indent, tab indent, blockquote '> 状态：✅', and HTML comment with fake '## ' & unclosed fence
+        write(
+            cards_dir / "T2_方法.md",
+            "# T2 方法\n\n## 进度回写\n"
+            "  - 状态：✅已收口\n"
+            "\t- 状态：✅已收口\n"
+            "> 状态：✅已收口 / ⬜可派\n"
+            "<!--\n## 假标题节\n```markdown\n- 状态：✅已收口\n-->\n"
+            "- 状态：⬜可派\n\n"
+            "## 📋 执行方派发提示词\n做\n\n## 📋 独立复核方派发提示词\n核\n",
+        )
+        rc3, out3 = run(line)
+        check(
+            rc3 == 0 and "[A007] ✅" in out3 and "1 张在用卡" in out3,
+            "2-space/tab indent, blockquote, and multiline comment with ## heading must all be ignored:\n" + out3,
+        )
+
+        # Similar variant 2: only indented state line + template '> 状态：🟠...' legend -> must report unparseable, not read ⬜ or 🟠
+        write(
+            cards_dir / "T2_方法.md",
+            "# T2 方法\n\n## 进度回写\n"
+            "  - 状态：⬜可派\n"
+            "> 状态：🟠待裁定（不可派）/ ⬜可派 / ✅已收口\n\n"
+            "## 📋 执行方派发提示词\n做\n\n## 📋 独立复核方派发提示词\n核\n",
+        )
+        rc4, out4 = run(line)
+        check(
+            rc4 == 0 and "[A007] ⚠️" in out4 and "状态行无法解析：T2_方法.md" in out4,
+            "card with only indented state line (plus blockquote legend) must report 状态行无法解析:\n" + out4,
+        )
+
+
+def test_041_r2_adv1_archive_nonempty_line_conservation() -> None:
+    """R2-Adv1: Non-handoff sections/prose before archived segments move into archive file; all non-empty lines are conserved."""
+    # Scenario 1 (chronological, exact R1 MARKER_ALPHA / MARKER_BETA scenario + indented prose)
+    with tempfile.TemporaryDirectory() as temp:
+        proj = Path(temp)
+        segs = []
+        for day in range(4, 16):  # 12 handoffs: 04, 05 archived; 06..15 kept
+            d_str = f"2026-09-{day:02d}"
+            prefix = ""
+            if day == 5:
+                prefix = "## 阶段背景备忘\nMARKER_ALPHA：这段非交接文字在被归档段之前，绝不能两边都丢。\n    INDENTED_ALPHA：四空格缩进备注行\n\n"
+            elif day == 6:
+                prefix = "## 里程碑过渡说明\nMARKER_BETA：这段非交接文字在首个保留段之前，应留在新 STATUS。\n\n"
+            segs.append(
+                f"{prefix}## Handoff（{d_str}，T{day}）\n"
+                "- **谁做的**：执行方\n"
+                f"- **改了什么**：第 {day} 步变更记录。\n"
+                "- **怎么验证的**：脚本通过。\n"
+                "- **没做什么**：无。\n"
+                "- **不确定处**：无。"
+            )
+        before_text = (
+            "# STATUS.md — 增量 Handoff\n\n> 本文件只记增量。\n\n"
+            + "\n\n".join(segs)
+            + "\n\n## 尾部附注\nMARKER_GAMMA：末尾非交接附注行。\n"
+        )
+        write(proj / "STATUS.md", before_text)
+        before_nonempty = [ln for ln in before_text.splitlines() if ln.strip()]
+
+        arc_rc, arc_out, _ = run_archiver(proj, "--keep", "10")
+        check(arc_rc == 0 and "已归档 2 段" in arc_out, "archive_status must archive 2 segments:\n" + arc_out)
+
+        new_status = (proj / "STATUS.md").read_text(encoding="utf-8")
+        arch_file = proj / "文档" / "STATUS_归档_至2026-09-05.md"
+        check(arch_file.is_file(), "archive file must exist")
+        arch_text = arch_file.read_text(encoding="utf-8")
+
+        check("MARKER_ALPHA" in arch_text and "INDENTED_ALPHA" in arch_text,
+              "gap before archived block (MARKER_ALPHA) must be written into archive file:\n" + arch_text)
+        check("MARKER_BETA" in new_status and "MARKER_GAMMA" in new_status,
+              "gap before kept block (MARKER_BETA) and trailing note (MARKER_GAMMA) must stay in STATUS.md:\n" + new_status)
+
+        combined_lines = set(new_status.splitlines()) | set(arch_text.splitlines())
+        missing_lines = [ln for ln in before_nonempty if ln not in combined_lines]
+        check(not missing_lines, f"non-empty lines lost after archiving: {missing_lines}")
+
+    # Similar variant: reverse-chronological STATUS (newest on top, oldest at bottom) with gap before archived tail
+    with tempfile.TemporaryDirectory() as temp:
+        proj = Path(temp)
+        rev_segs = []
+        for day in range(15, 3, -1):  # 15..06 kept, 05..04 archived
+            d_str = f"2026-09-{day:02d}"
+            prefix = "## 早期散记\nMARKER_REV_GAP：倒序排布时旧段前面的散文字。\n\n" if day == 5 else ""
+            rev_segs.append(
+                f"{prefix}## Handoff（{d_str}，T{day}）\n"
+                "- **谁做的**：执行方\n"
+                f"- **改了什么**：倒序第 {day} 步。\n"
+                "- **怎么验证的**：通过。\n"
+                "- **没做什么**：无。\n"
+                "- **不确定处**：无。"
+            )
+        rev_before = "# STATUS.md\n\n" + "\n\n".join(rev_segs) + "\n"
+        write(proj / "STATUS.md", rev_before)
+        rev_nonempty = [ln for ln in rev_before.splitlines() if ln.strip()]
+
+        arc_rc2, _, _ = run_archiver(proj, "--keep", "10")
+        check(arc_rc2 == 0, "reverse-chronological archive must succeed")
+        new_rev = (proj / "STATUS.md").read_text(encoding="utf-8")
+        arch_rev = (proj / "文档" / "STATUS_归档_至2026-09-05.md").read_text(encoding="utf-8")
+        check("MARKER_REV_GAP" in arch_rev, "MARKER_REV_GAP in reverse-chrono STATUS must enter archive file")
+        missing_rev = [ln for ln in rev_nonempty if ln not in (set(new_rev.splitlines()) | set(arch_rev.splitlines()))]
+        check(not missing_rev, f"reverse-chrono non-empty lines lost after archiving: {missing_rev}")
+
+
+def test_041_r2_adv2_7_h4_excluded_in_docs_and_a011() -> None:
+    """R2-Adv2&7: #### and deeper headings are not handoff segments; SKILL.md, assets/STATUS.md, and A011 message state this explicitly."""
+    skill_md = (REPO / "SKILL.md").read_text(encoding="utf-8")
+    status_tpl = (REPO / "assets" / "STATUS.md").read_text(encoding="utf-8")
+    check("####" in skill_md and "不算交接" in skill_md, "SKILL.md must state #### and deeper headings do not count as handoffs")
+    check("####" in status_tpl and "不算交接" in status_tpl, "assets/STATUS.md must state #### and deeper headings do not count as handoffs")
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        for deep_head in ("#### Handoff（2026-09-15）", "##### 交接（2026-09-15）"):
+            deep_status = (
+                f"# STATUS\n\n{deep_head}\n"
+                "- **谁做的**：执行方\n- **改了什么**：四级标题测试。\n- **怎么验证的**：脚本。\n- **没做什么**：无。\n- **不确定处**：无。\n"
+            )
+            write(line / "STATUS.md", deep_status)
+            check(len(checker_mod.handoff_blocks(deep_status)) == 0, f"{deep_head} must not form a handoff block")
+            rc, out = run(line)
+            check(
+                rc == 0 and "[A011] ⚠️" in out and "####" in out and "不算" in out,
+                f"A011 warning on {deep_head} must explicitly note #### headings do not count:\n{out}",
+            )
+
+
+def test_041_r2_adv3_changelog_notes_bare_jiaohui() -> None:
+    """R2-Adv3: CHANGELOG.md records behavior change that bare '## 交回' no longer counts as a handoff heading."""
+    changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+    sec_041 = changelog.split("## 0.4.0", 1)[0]
+    check(
+        "## 交回" in sec_041 and "不再算交接" in sec_041,
+        "CHANGELOG.md 0.4.1 section must document that bare '## 交回' no longer counts as a handoff:\n" + sec_041,
+    )
+    # Verify actual behavior matches CHANGELOG note (bare '## 交回（日期）' excluded, while '## T13c 交回（日期）' counts)
+    for bare in ("## 交回", "## 交回（2026-09-15）", "### 交回备注"):
+        s = f"# STATUS\n\n{bare}\n正文。\n"
+        check(len(checker_mod.handoff_blocks(s)) == 0, f"bare '{bare}' without T<id>+date or leading date must not count")
+    with_tid = "# STATUS\n\n## T13c 交回（2026-09-15）\n正文。\n"
+    check(len(checker_mod.handoff_blocks(with_tid)) == 1, "'## T13c 交回（2026-09-15）' must still count as handoff")
+
+
 def main() -> int:
     test_asset_sizes()
 
@@ -1443,6 +1795,12 @@ def main() -> int:
     test_041_s7_handoff_heading_words_and_docs()
     test_041_s8_subprocess_utf8_no_gbk_error()
     test_041_s10_index_template_a011_recent_five()
+    test_041_r2_s1_sec3_heading_date_counted()
+    test_041_r2_s2_inline_placeholder_span_stripping()
+    test_041_r2_s3_top_level_card_state_and_html_comments()
+    test_041_r2_adv1_archive_nonempty_line_conservation()
+    test_041_r2_adv2_7_h4_excluded_in_docs_and_a011()
+    test_041_r2_adv3_changelog_notes_bare_jiaohui()
 
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
