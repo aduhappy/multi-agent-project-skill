@@ -6,6 +6,7 @@
     python scripts/archive_status.py                      # 保留 STATUS 最近 10 段、AGENTS §3 最近 5 条
     python scripts/archive_status.py PATH --keep 10       # 指定项目根与保留段数
     python scripts/archive_status.py PATH --dry-run       # 只预览不写盘
+    python scripts/archive_status.py --version            # 查看脚本版本号
 
 行为：
   - STATUS.md：交接段数 > --keep（默认 10）时，保留最近 N 段，其余原样移到
@@ -14,6 +15,7 @@
   - AGENTS.md：§3 可归档快照条数 > --agents-keep（默认 5）时，保留最近 M 条（保留“阻塞”与 `→` 指针行），
     其余原样移到 文档/AGENTS_归档_至<日期>.md，并在 §3 留一行 `>` 引用。
     （若 AGENTS.md 超 25KB 是因 §3.5 决策登记表过长，需按 §3.5 规矩手动迁出全文，本脚本不拆决策表。）
+  - 换行符保持：写回原文件时保持原文件的 LF 或 CRLF；新建归档文件的换行符与对应源文件（默认 STATUS.md）一致。
 """
 from __future__ import annotations
 
@@ -24,6 +26,10 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
+sys.dont_write_bytecode = True
+
+__version__ = "0.4.1"
+
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8", errors="replace")
@@ -33,10 +39,28 @@ for _stream in (sys.stdout, sys.stderr):
 DATE_RE = re.compile(r"(?<!\d)(20\d{2}-\d{2}-\d{2})(?!\d)")
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEAD_RE = re.compile(r"^\s*(#{1,6})\s+(.*)$")
+HANDOFF_INNER_HEAD_RE = re.compile(r"^[\*【\[]*(?:谁做的|改了什么|怎么验证|没做什么|不确定处)")
+
+
+def detect_eol(raw_bytes: bytes) -> str:
+    crlf = raw_bytes.count(b"\r\n")
+    bare_lf = raw_bytes.count(b"\n") - crlf
+    return "\r\n" if crlf > bare_lf else "\n"
+
+
+def read_utf8_and_eol(path: Path) -> tuple[str, str]:
+    raw_bytes = path.read_bytes()
+    return raw_bytes.decode("utf-8-sig"), detect_eol(raw_bytes)
 
 
 def read_utf8(path: Path) -> str:
     return path.read_bytes().decode("utf-8-sig")
+
+
+def write_with_eol(path: Path, text: str, eol: str) -> None:
+    norm = text.replace("\r\n", "\n").replace("\r", "\n")
+    out = norm.replace("\n", "\r\n") if eol == "\r\n" else norm
+    path.write_bytes(out.encode("utf-8"))
 
 
 def unfenced_indices(lines: list[str]) -> set[int]:
@@ -73,7 +97,13 @@ def latest_date(text: str, today: date) -> Optional[date]:
 
 def is_handoff_title(title: str) -> bool:
     t = title.strip()
-    return bool(re.search(r"(?i)handoff", t) or re.match(r"^\d{4}-\d{2}-\d{2}", t))
+    if re.search(r"归档|archive|现状一屏|current\s+snapshot", t, re.I):
+        return False
+    return bool(
+        re.search(r"(?i)handoff|交接|交回", t)
+        or re.match(r"^[\[（(【]?\s*\d{4}[-/.]\d{2}[-/.]\d{2}", t)
+        or (re.match(r"^[\[（(【]?\s*T\d+[A-Za-z0-9-]*\b", t, re.I) and DATE_RE.search(t))
+    )
 
 
 def parse_status(text: str) -> tuple[list[str], list[str], list[str]]:
@@ -84,9 +114,12 @@ def parse_status(text: str) -> tuple[list[str], list[str], list[str]]:
     for i in sorted(unfenced):
         m = HEAD_RE.match(lines[i])
         if m:
-            headings.append((i, len(m.group(1)), m.group(2)))
+            headings.append((i, len(m.group(1)), m.group(2).strip()))
 
-    handoff_heads = [(i, lvl, t) for i, lvl, t in headings if lvl >= 2 and is_handoff_title(t)]
+    handoff_heads = [
+        (i, lvl, t) for i, lvl, t in headings
+        if lvl >= 2 and is_handoff_title(t) and not HANDOFF_INNER_HEAD_RE.match(t)
+    ]
     if not handoff_heads:
         return lines, [], []
 
@@ -99,7 +132,10 @@ def parse_status(text: str) -> tuple[list[str], list[str], list[str]]:
     postamble: list[str] = []
     for idx, start in enumerate(top_handoff_starts):
         next_same_or_higher = next(
-            (i for i, lvl, _ in headings if i > start and lvl <= top_lvl),
+            (
+                i for i, lvl, t in headings
+                if i > start and (lvl < top_lvl or (lvl == top_lvl and not HANDOFF_INNER_HEAD_RE.match(t)))
+            ),
             len(lines),
         )
         seg_lines = lines[start:next_same_or_higher]
@@ -139,30 +175,35 @@ def upsert_quote_ref(lines: list[str], marker: str, default_prefix: str, ref_rel
     return out
 
 
-def append_or_create_archive(arch_path: Path, header_title: str, header_note: str, body: str) -> None:
+def append_or_create_archive(
+    arch_path: Path, header_title: str, header_note: str, body: str, default_eol: str
+) -> None:
     arch_path.parent.mkdir(parents=True, exist_ok=True)
     chunk = body.strip() + "\n"
     if arch_path.is_file() and arch_path.stat().st_size > 0:
-        existing = read_utf8(arch_path).rstrip()
-        arch_path.write_text(existing + "\n\n" + chunk, encoding="utf-8")
+        existing_raw, arch_eol = read_utf8_and_eol(arch_path)
+        existing = existing_raw.rstrip()
+        write_with_eol(arch_path, existing + "\n\n" + chunk, arch_eol)
     else:
         header = f"# {header_title}\n\n> {header_note}\n\n"
-        arch_path.write_text(header + chunk, encoding="utf-8")
+        write_with_eol(arch_path, header + chunk, default_eol)
 
 
-def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> None:
+def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> Optional[str]:
     status_path = root / "STATUS.md"
     if not status_path.is_file():
         print("STATUS.md：不存在，跳过。")
-        return
+        return None
 
-    raw = read_utf8(status_path)
-    before_bytes = len(raw.encode("utf-8"))
+    raw_bytes = status_path.read_bytes()
+    status_eol = detect_eol(raw_bytes)
+    raw = raw_bytes.decode("utf-8-sig")
+    before_bytes = len(raw_bytes)
     preamble, blocks, postamble = parse_status(raw)
     total = len(blocks)
     if total <= keep:
         print(f"STATUS.md：共 {total} 段交接（≤ {keep}），无需归档（{before_bytes}B）。")
-        return
+        return status_eol
 
     d_first = latest_date(blocks[0], today)
     d_last = latest_date(blocks[-1], today)
@@ -187,37 +228,44 @@ def archive_status_file(root: Path, keep: int, today: date, dry_run: bool) -> No
     parts = ["\n".join(new_preamble).rstrip(), "\n\n".join(kept)]
     if postamble and "\n".join(postamble).strip():
         parts.append("\n".join(postamble).strip())
-    new_status = "\n\n".join(p for p in parts if p) + "\n"
-    after_bytes = len(new_status.encode("utf-8"))
+    new_status_lf = "\n\n".join(p for p in parts if p) + "\n"
+    new_status_final = new_status_lf.replace("\n", "\r\n") if status_eol == "\r\n" else new_status_lf
+    after_bytes = len(new_status_final.encode("utf-8"))
 
     if dry_run:
         print(
             f"[DRY-RUN] STATUS.md：将归档 {len(to_archive)} 段 → {rel_arch}，保留 {len(kept)} 段；"
             f"体积 {before_bytes}B → {after_bytes}B。"
         )
-        return
+        return status_eol
 
     append_or_create_archive(
         arch_path,
         header_title=f"STATUS 归档（原样迁出，至 {arch_date_str}）",
         header_note="自 `STATUS.md` 原样移出的旧交接段，只作历史查阅；当前状态以 `AGENTS.md` §3 与 `STATUS.md` 为准。",
         body="\n\n".join(to_archive),
+        default_eol=status_eol,
     )
-    status_path.write_text(new_status, encoding="utf-8")
+    write_with_eol(status_path, new_status_lf, status_eol)
     warn_tail = "（注意：仍 >40KB，可调小 --keep）" if after_bytes > 40_000 else ""
     print(
         f"STATUS.md：已归档 {len(to_archive)} 段 → {rel_arch}，保留 {len(kept)} 段；"
         f"体积 {before_bytes}B → {after_bytes}B{warn_tail}。"
     )
+    return status_eol
 
 
-def archive_agents_sec3(root: Path, agents_keep: int, today: date, dry_run: bool) -> None:
+def archive_agents_sec3(
+    root: Path, agents_keep: int, today: date, dry_run: bool, status_eol: Optional[str] = None
+) -> None:
     agents_path = root / "AGENTS.md"
     if not agents_path.is_file():
         return
 
-    raw = read_utf8(agents_path)
-    before_bytes = len(raw.encode("utf-8"))
+    raw_bytes = agents_path.read_bytes()
+    agents_eol = detect_eol(raw_bytes)
+    raw = raw_bytes.decode("utf-8-sig")
+    before_bytes = len(raw_bytes)
     lines = raw.splitlines()
     unfenced = unfenced_indices(lines)
 
@@ -321,8 +369,9 @@ def archive_agents_sec3(root: Path, agents_keep: int, today: date, dry_run: bool
 
     new_sec3_lines = [sec_head] + updated_lead + kept_entry_lines + [""]
     new_lines = lines[:sec3_start] + new_sec3_lines + lines[sec3_end:]
-    new_agents = "\n".join(new_lines).rstrip() + "\n"
-    after_bytes = len(new_agents.encode("utf-8"))
+    new_agents_lf = "\n".join(new_lines).rstrip() + "\n"
+    new_agents_final = new_agents_lf.replace("\n", "\r\n") if agents_eol == "\r\n" else new_agents_lf
+    after_bytes = len(new_agents_final.encode("utf-8"))
 
     if dry_run:
         print(
@@ -331,13 +380,15 @@ def archive_agents_sec3(root: Path, agents_keep: int, today: date, dry_run: bool
         )
         return
 
+    arch_default_eol = status_eol if status_eol is not None else agents_eol
     append_or_create_archive(
         arch_path,
         header_title=f"AGENTS §3 归档（原样迁出，至 {arch_date_str}）",
         header_note="自 `AGENTS.md` §3 原样移出的旧快照条目，只作历史查阅；当前状态以 `AGENTS.md` §3 与 `STATUS.md` 为准。",
-        body="\n".join(to_archive_blocks),
+        body="\n\n".join(to_archive_blocks),
+        default_eol=arch_default_eol,
     )
-    agents_path.write_text(new_agents, encoding="utf-8")
+    write_with_eol(agents_path, new_agents_lf, agents_eol)
     print(
         f"AGENTS.md §3：已归档 {len(to_archive_blocks)} 条 → {rel_arch}，"
         f"保留 {len(keep_indices)} 条快照（含阻塞共 {len(keep_indices) + trailer_bullets} 条）；体积 {before_bytes}B → {after_bytes}B。"
@@ -351,6 +402,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--agents-keep", type=int, default=5, help="AGENTS.md §3 保留最近 M 条快照（默认 5）")
     parser.add_argument("--today", help="YYYY-MM-DD，覆盖今天日期（测试用）")
     parser.add_argument("--dry-run", action="store_true", help="只预览不写文件")
+    parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args(argv)
 
     if args.keep < 1 or args.agents_keep < 1:
@@ -366,8 +418,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     today = datetime.strptime(args.today, "%Y-%m-%d").date() if args.today else date.today()
-    archive_status_file(root, args.keep, today, args.dry_run)
-    archive_agents_sec3(root, args.agents_keep, today, args.dry_run)
+    status_eol = archive_status_file(root, args.keep, today, args.dry_run)
+    archive_agents_sec3(root, args.agents_keep, today, args.dry_run, status_eol=status_eol)
     return 0
 
 
