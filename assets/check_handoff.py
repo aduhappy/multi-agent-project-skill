@@ -324,7 +324,7 @@ def check_agents_placeholders_a014(agents: str) -> tuple[bool, str]:
 
 
 def card_re(cid: str) -> re.Pattern[str]:
-    return re.compile(rf"(?<![A-Za-z0-9-]){re.escape(cid)}(?![A-Za-z0-9-])")
+    return re.compile(rf"(?<![A-Za-z0-9-]){re.escape(cid)}(?![A-Za-z0-9-])", re.I)
 
 
 def subject_card(line: str, states: dict[str, tuple[str, str]]) -> Optional[str]:
@@ -393,8 +393,9 @@ def _sec4_item_groups(body: str, states: dict[str, tuple[str, str]]) -> tuple[st
 
 
 def sec4_card_drifts(board_items: list[hl.BoardItem], states: dict[str, tuple[str, str]]) -> list[str]:
-    """核对 §4 看板与卡面收口状态：单卡行看行首勾选框；一行多卡时优先看各卡同子句的内联状态符号。"""
+    """核对 §4 看板与卡面收口状态（卡号比对不分大小写）：单卡行看行首勾选框；一行多卡时优先看各卡同子句的内联状态符号。"""
     drifts: list[str] = []
+    ci_states = {k.upper(): (k, v[0], v[1]) for k, v in states.items()}
     for item in board_items:
         for box_done, body_raw, body_nc in item.sub_items:
             if hl.is_template_task_body(body_raw):
@@ -403,9 +404,10 @@ def sec4_card_drifts(board_items: list[hl.BoardItem], states: dict[str, tuple[st
             if not groups:
                 continue
             if sum(len(g[2]) for g in groups) <= 1:
-                cid = groups[0][2][0]
-                if cid in states and box_done != (states[cid][0] in hl.CLOSED):
-                    drifts.append(f"{cid} 卡面 {states[cid][0]}／§4 {'已勾' if box_done else '未勾'}")
+                raw_cid = groups[0][2][0]
+                hit = ci_states.get(raw_cid.upper())
+                if hit is not None and box_done != (hit[1] in hl.CLOSED):
+                    drifts.append(f"{hit[0]} 卡面 {hit[1]}／§4 {'已勾' if box_done else '未勾'}")
                 continue
 
             for idx, (s, e, cids) in enumerate(groups):
@@ -427,26 +429,32 @@ def sec4_card_drifts(board_items: list[hl.BoardItem], states: dict[str, tuple[st
                         own_before = before[seps[-1].end() :] if seps else ""
                     mark_m = hl.STATE_RE.search(own_before)
 
-                for cid in cids:
-                    if cid not in states:
+                for raw_cid in cids:
+                    hit = ci_states.get(raw_cid.upper())
+                    if hit is None:
                         continue
-                    card_st = states[cid][0]
+                    canon_cid, card_st, _ = hit
                     if mark_m:
                         inline_st = mark_m.group(0)
                         if (inline_st in hl.CLOSED) != (card_st in hl.CLOSED):
-                            drifts.append(f"{cid} 卡面 {card_st}／§4 {inline_st}")
+                            drifts.append(f"{canon_cid} 卡面 {card_st}／§4 {inline_st}")
                     elif box_done != (card_st in hl.CLOSED):
-                        drifts.append(f"{cid} 卡面 {card_st}／§4 {'已勾' if box_done else '未勾'}")
+                        drifts.append(f"{canon_cid} 卡面 {card_st}／§4 {'已勾' if box_done else '未勾'}")
     return drifts
 
 
 def card_states(cards: list[Path]) -> dict[str, tuple[str, str]]:
-    """卡号 → （“进度回写”节里“状态：”行的状态符号, 文件名）。"""
+    """卡号 → （“进度回写”节里“状态：”行的状态符号, 文件名），同卡号（忽略大小写）保留首个文件。"""
     states: dict[str, tuple[str, str]] = {}
+    seen_upper: set[str] = set()
     for fp in cards:
         mark = hl.parse_card_state(hl.read_utf8(fp))
         if mark:
-            states[hl.extract_card_id(fp.stem)] = (mark, fp.name)
+            cid = hl.extract_card_id(fp.stem)
+            cu = cid.upper()
+            if cu not in seen_upper:
+                seen_upper.add(cu)
+                states[cid] = (mark, fp.name)
     return states
 
 
@@ -716,6 +724,19 @@ def advisories(
     )
 
     states = card_states(cards)
+    by_cid_files: dict[str, list[str]] = {}
+    by_cid_disp: dict[str, str] = {}
+    for fp in cards:
+        cid = hl.extract_card_id(fp.stem)
+        cu = cid.upper()
+        by_cid_disp.setdefault(cu, cid)
+        by_cid_files.setdefault(cu, []).append(fp.name)
+    dup_card_issues = [
+        f"卡号重复（{by_cid_disp[cu]}）：{'、'.join(fnames)}"
+        for cu, fnames in by_cid_files.items()
+        if len(fnames) > 1
+    ]
+
     idx_doc = hl.parse_markdown(index)
     drift = []
     for b in idx_doc.blocks:
@@ -725,10 +746,16 @@ def advisories(
         cells = [c.strip(" *`") for c in b.cells]
         for cid, (state, name) in states.items():
             mark = hl.STATE_RE.search("|".join(cells[1:]))
-            if (cells[0] == cid or name in row_raw) and mark and (mark.group(0) in hl.CLOSED) != (state in hl.CLOSED):
+            if (
+                (cells[0].upper() == cid.upper() or name.lower() in row_raw.lower())
+                and mark
+                and (mark.group(0) in hl.CLOSED) != (state in hl.CLOSED)
+            ):
                 drift.append(f"{cid} 卡面 {state}／索引 {mark.group(0)}")
     drift.extend(sec4_card_drifts(board_items, states))
     a007_issues: list[str] = []
+    if dup_card_issues:
+        a007_issues.extend(dup_card_issues)
     if unparsed_cards:
         a007_issues.append(
             "状态行无法解析：" + "、".join(unparsed_cards[:5]) + ("…" if len(unparsed_cards) > 5 else "")

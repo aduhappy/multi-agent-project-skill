@@ -107,8 +107,8 @@ HANDOFF_SECTIONS = (
     ("没做什么", re.compile(r"^\s*>?\s*(?:[-*+]|\d+[.)]|#{2,6})?\s*[\*【\[]*没做什么")),
     ("不确定处", re.compile(r"^\s*>?\s*(?:[-*+]|\d+[.)]|#{2,6})?\s*[\*【\[]*不确定处")),
 )
-SLASH_CARDS_RE = re.compile(r"(?<![A-Za-z0-9-])([A-Za-z]+\d+)([a-z](?:/[a-z])+)(?![A-Za-z0-9-])")
-GENERIC_TASK_RE = re.compile(r"(?<![A-Za-z0-9-])T\d+[A-Za-z0-9-]*(?![A-Za-z0-9-])")
+SLASH_CARDS_RE = re.compile(r"(?<![A-Za-z0-9-])([A-Za-z]+\d+)([A-Za-z](?:/[A-Za-z])+)(?![A-Za-z0-9-])")
+GENERIC_TASK_RE = re.compile(r"(?<![A-Za-z0-9-])[Tt]\d+[A-Za-z0-9-]*(?![A-Za-z0-9-])")
 CLAUSE_SEP_RE = re.compile(r"[、，,;；|]")
 DECISION_ID_RE = re.compile(r"[A-Za-z]+-\d+[A-Za-z0-9]*|[A-Za-z]+\d+[A-Za-z0-9]*")
 EMPTY_CELL_VALUES = {"", "-", "--", "---", "—", "——", "–", "无", "none", "n/a", "/"}

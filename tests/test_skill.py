@@ -2176,6 +2176,36 @@ def test_042_v5_h3_progress_section() -> None:
         )
 
 
+def test_042_v6_card_id_case_and_collision() -> None:
+    """0.4.2 V6: card ID comparison is case-insensitive; colliding card IDs warn and name both files."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        cards_dir = line / "文档" / "任务卡"
+        # Lowercase filename t1_初稿.md closed ✅ while §4 has unticked '- [ ] T1 初稿' and index has 'T1 | ⬜' -> case-insensitive drift!
+        base_agents = (line / "AGENTS.md").read_text(encoding="utf-8")
+        write(line / "AGENTS.md", base_agents.replace("- [x] T1 初稿", "- [ ] T1 初稿"))
+        write(line / "文档" / "任务卡_README.md", "| 卡号 | 状态 |\n|---|---|\n| T1 | ⬜ |\n")
+        write(cards_dir / "t1_初稿.md", "# t1\n\n## 进度回写\n- 状态：✅已收口\n")
+        rc1, out1 = run(line)
+        check(
+            rc1 == 0
+            and "[A007] ⚠️" in out1
+            and "t1 卡面 ✅／§4 未勾" in out1
+            and "t1 卡面 ✅／索引 ⬜" in out1,
+            f"lowercase card file t1_初稿.md must match uppercase T1 in §4 and index:\n{out1}",
+        )
+
+        # Fix §4 & index, then add colliding card file T1_补充.md -> must warn and name both t1_初稿.md and T1_补充.md!
+        write(line / "AGENTS.md", base_agents)
+        write(line / "文档" / "任务卡_README.md", "| 卡号 | 状态 |\n|---|---|\n| T1 | ✅ |\n")
+        write(cards_dir / "T1_补充.md", "# T1 补充\n\n## 进度回写\n- 状态：✅已收口\n")
+        rc2, out2 = run(line)
+        check(
+            rc2 == 0 and "[A007] ⚠️" in out2 and "卡号重复" in out2 and "t1_初稿.md" in out2 and "T1_补充.md" in out2,
+            f"duplicate card ID across files must warn and name both files:\n{out2}",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2356,6 +2386,7 @@ def main(argv: list[str] | None = None) -> int:
     test_042_v3_commented_handoff_headings()
     test_042_v4_h006_fallback_body_only()
     test_042_v5_h3_progress_section()
+    test_042_v6_card_id_case_and_collision()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")
