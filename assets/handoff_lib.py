@@ -897,11 +897,11 @@ def block_mentions_active_card(seg: str, active_cids: list[str]) -> bool:
 
 
 def extract_progress_blocks(doc: ParsedDoc) -> list[Block]:
-    """Return content blocks inside the '## 进度回写' section of a task card."""
+    """Return content blocks inside the '## 进度回写' or '### 进度回写' section of a task card."""
     start_idx: Optional[int] = None
     start_lvl = 2
     for idx, b in enumerate(doc.blocks):
-        if b.kind == "heading" and b.level == 2 and b.title.startswith("进度回写"):
+        if b.kind == "heading" and b.level in (2, 3) and b.title.startswith("进度回写"):
             start_idx = idx
             start_lvl = b.level
             break

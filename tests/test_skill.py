@@ -2156,6 +2156,26 @@ def test_042_v4_h006_fallback_body_only() -> None:
         )
 
 
+def test_042_v5_h3_progress_section() -> None:
+    """0.4.2 V5: '### 进度回写' is recognized identically to '## 进度回写' across A005/A006/A007/A009 and --role."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        cards_dir = line / "文档" / "任务卡"
+        write(cards_dir / "T1_初稿.md", "# T1\n\n### 进度回写\n- 状态：✅已收口\n")
+        write(
+            cards_dir / "T2_方法.md",
+            "# T2 方法\n\n### 进度回写（三级标题）\n"
+            "- 状态：⬜可派\n"
+            "- 执行方：工具【Antigravity】/ 模型【Gemini 4 Carbon】/ 家族【Google】\n\n"
+            "### 📋 执行方派发提示词\n做\n\n### 📋 独立复核方派发提示词\n核\n",
+        )
+        rc, out = run(line)
+        check(
+            rc == 0 and "[A005] ✅" in out and "[A007] ✅" in out and "2 张卡有“进度回写”" in out,
+            f"### 进度回写 must be parsed cleanly without 状态行无法解析:\n{out}",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2335,6 +2355,7 @@ def main(argv: list[str] | None = None) -> int:
     test_042_v2_bare_placeholder_dates()
     test_042_v3_commented_handoff_headings()
     test_042_v4_h006_fallback_body_only()
+    test_042_v5_h3_progress_section()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")
