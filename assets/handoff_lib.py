@@ -105,8 +105,7 @@ CLAUSE_SEP_RE = re.compile(r"[、，,;；|]")
 DECISION_ID_RE = re.compile(r"[A-Za-z]+-\d+[A-Za-z0-9]*|[A-Za-z]+\d+[A-Za-z0-9]*")
 EMPTY_CELL_VALUES = {"", "-", "--", "---", "—", "——", "–", "无", "none", "n/a", "/"}
 
-# Compatibility switches isolated for Step 3 atomic commits (V1, V3)
-_V1_COMMENT_AND_UNCLOSED_FENCE = False
+# Compatibility switch isolated for Step 3 atomic commit (V3)
 _STATUS_SKIP_COMMENTED_HEADINGS = False
 
 
@@ -384,12 +383,22 @@ def _split_table_cells(spans: tuple[InlineSpan, ...]) -> tuple[str, ...]:
     return tuple(cells)
 
 
-def _tokenize_line_with_comments_step2(
-    line: str, in_comment: bool
+def _has_closing_comment_ahead(lines: list[str], after_line: int) -> bool:
+    for k in range(after_line + 1, len(lines)):
+        if "-->" in lines[k]:
+            return True
+    return False
+
+
+def _tokenize_line_with_comments(
+    lines: list[str], line_idx: int, in_comment: bool
 ) -> tuple[tuple[InlineSpan, ...], bool]:
-    """Tokenize a non-fenced line with HTML comment tracking (baseline v0.4.1 comment semantics)."""
+    """Tokenize a non-fenced line with inline-code precedence, <!--> empty comments, and unclosed <!-- safety."""
+    line = lines[line_idx]
     spans: list[InlineSpan] = []
     pos = 0
+    n_ln = len(line)
+
     if in_comment:
         end_idx = line.find("-->")
         if end_idx == -1:
@@ -398,20 +407,76 @@ def _tokenize_line_with_comments_step2(
         pos = end_idx + 3
         in_comment = False
 
-    while pos < len(line):
-        idx = line.find("<!--", pos)
-        if idx == -1:
-            spans.extend(parse_inlines(line[pos:]))
+    while pos < n_ln:
+        bt_idx = line.find("`", pos)
+        cm_idx = line.find("<!--", pos)
+
+        if bt_idx == -1 and cm_idx == -1:
+            raw_txt = line[pos:]
+            spans.append(InlineSpan("text", raw_txt, raw_txt))
             break
-        if idx > pos:
-            spans.extend(parse_inlines(line[pos:idx]))
-        end_idx = line.find("-->", idx + 4)
-        if end_idx == -1:
-            spans.append(InlineSpan("comment", line[idx:], line[idx + 4 :]))
+
+        if bt_idx != -1 and (cm_idx == -1 or bt_idx < cm_idx):
+            if bt_idx > pos:
+                raw_txt = line[pos:bt_idx]
+                spans.append(InlineSpan("text", raw_txt, raw_txt))
+            run_end = bt_idx
+            while run_end < n_ln and line[run_end] == "`":
+                run_end += 1
+            tick_len = run_end - bt_idx
+            search_pos = run_end
+            close_start = -1
+            while search_pos < n_ln:
+                idx = line.find("`", search_pos)
+                if idx == -1:
+                    break
+                c_end = idx
+                while c_end < n_ln and line[c_end] == "`":
+                    c_end += 1
+                if c_end - idx == tick_len:
+                    close_start = idx
+                    break
+                search_pos = c_end
+            if close_start != -1:
+                raw_code = line[bt_idx : close_start + tick_len]
+                inner = line[run_end:close_start]
+                spans.append(InlineSpan("code", raw_code, inner))
+                pos = close_start + tick_len
+            else:
+                raw_ticks = line[bt_idx:run_end]
+                spans.append(InlineSpan("text", raw_ticks, raw_ticks))
+                pos = run_end
+            continue
+
+        # cm_idx != -1 and comes before any backtick
+        if cm_idx > pos:
+            raw_txt = line[pos:cm_idx]
+            spans.append(InlineSpan("text", raw_txt, raw_txt))
+
+        if line.startswith("<!-->", cm_idx):
+            spans.append(InlineSpan("comment", "<!-->", ""))
+            pos = cm_idx + 5
+            continue
+        if line.startswith("<!--->", cm_idx):
+            spans.append(InlineSpan("comment", "<!--->", ""))
+            pos = cm_idx + 6
+            continue
+
+        end_idx = line.find("-->", cm_idx + 4)
+        if end_idx != -1:
+            spans.append(InlineSpan("comment", line[cm_idx : end_idx + 3], line[cm_idx + 4 : end_idx]))
+            pos = end_idx + 3
+            continue
+
+        if _has_closing_comment_ahead(lines, line_idx):
+            spans.append(InlineSpan("comment", line[cm_idx:], line[cm_idx + 4 :]))
             in_comment = True
             break
-        spans.append(InlineSpan("comment", line[idx : end_idx + 3], line[idx + 4 : end_idx]))
-        pos = end_idx + 3
+
+        # Unclosed '<!--' with no closing '-->' anywhere ahead -> treat as literal text, never swallow subsequent lines
+        spans.append(InlineSpan("text", "<!--", "<!--"))
+        pos = cm_idx + 4
+
     return tuple(spans), in_comment
 
 
@@ -433,9 +498,9 @@ def parse_markdown(text: str, *, strip_comments: Optional[bool] = None) -> Parse
     lines = text.splitlines()
     n = len(lines)
     blocks: list[Block] = []
-    do_comments = _V1_COMMENT_AND_UNCLOSED_FENCE if strip_comments is None else strip_comments
+    do_comments = True if strip_comments is None else strip_comments
 
-    # Pass 1: identify fenced code blocks and tokenize comments/inlines on remaining lines
+    # Pass 1: identify closed fenced code blocks and tokenize comments/inlines on remaining lines
     fenced_ranges: dict[int, int] = {}
     idx = 0
     in_comment = False
@@ -451,12 +516,8 @@ def parse_markdown(text: str, *, strip_comments: Optional[bool] = None) -> Parse
                     fenced_ranges[idx] = close_idx + 1
                     idx = close_idx + 1
                     continue
-                if not _V1_COMMENT_AND_UNCLOSED_FENCE:
-                    fenced_ranges[idx] = n
-                    idx = n
-                    continue
         if do_comments:
-            spans, in_comment = _tokenize_line_with_comments_step2(ln, in_comment)
+            spans, in_comment = _tokenize_line_with_comments(lines, idx, in_comment)
         else:
             spans = parse_inlines(ln)
         line_spans[idx] = spans

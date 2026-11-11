@@ -2020,6 +2020,34 @@ def test_042_conv5_archive_keep_active_cards() -> None:
         )
 
 
+def test_042_v1_comment_boundaries() -> None:
+    """0.4.2 V1: inline-code `<!--`, empty comments <!--> / <!--->, and unclosed <!-- never swallow subsequent 状态 lines."""
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        cards_dir = line / "文档" / "任务卡"
+        write(cards_dir / "T1_初稿.md", "# T1\n\n## 进度回写\n- 状态：✅已收口\n")
+
+        for label, snippet in (
+            ("inline code `<!--`", "- 说明：行内反引号里的 `<!--` 不是注释起点\n- 状态：⬜可派\n"),
+            ("empty comment <!-->", "<!-->\n- 状态：⬜可派\n"),
+            ("empty comment <!--->", "<!--->\n- 状态：⬜可派\n"),
+            ("unclosed <!--", "备注：手滑写了没闭合的 <!-- 注释头\n- 状态：⬜可派\n"),
+            (
+                "bt_wrongread (`<!--` before real ⬜ and closed comment before fake ✅)",
+                "- 说明：先出现 `<!--`\n- 状态：⬜可派\n<!-- 正常闭合 -->\n- 状态：✅已收口\n",
+            ),
+        ):
+            write(
+                cards_dir / "T2_方法.md",
+                f"# T2 方法\n\n## 进度回写\n{snippet}\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n",
+            )
+            rc, out = run(line)
+            check(
+                rc == 0 and "[A007] ✅" in out and "[A005] ✅" in out and "1 张在用卡" in out,
+                f"V1 failed on {label}:\n{out}",
+            )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2195,6 +2223,7 @@ def main(argv: list[str] | None = None) -> int:
     test_042_conv3_role()
     test_042_conv4_config()
     test_042_conv5_archive_keep_active_cards()
+    test_042_v1_comment_boundaries()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")
