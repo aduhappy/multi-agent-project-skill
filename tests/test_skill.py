@@ -132,6 +132,7 @@ def check(condition: bool, message: str) -> None:
 def test_asset_sizes() -> None:
     for rel, limit in (
         ("SKILL.md", 15_000),
+        ("assets/协作规矩.md", 25_000),
         ("assets/任务卡_README.md", 15_000),
         ("assets/任务规划_模板.md", 15_000),
     ):
@@ -491,6 +492,10 @@ def test_r1_asset_keywords_and_restored_refs() -> None:
         check(kw in status_tpl, f"assets/STATUS.md missing keyword: {kw}")
 
     readme_tpl = (REPO / "assets" / "任务卡_README.md").read_text(encoding="utf-8")
+    check("协作规矩.md" in readme_tpl, "assets/任务卡_README.md must point to 协作规矩.md")
+    check("| T1 |" not in readme_tpl, "assets/任务卡_README.md must not have real '| T1 |' example row")
+
+    rules_tpl = (REPO / "assets" / "协作规矩.md").read_text(encoding="utf-8")
     for kw in (
         "## 会出错",
         "## 建议",
@@ -501,8 +506,7 @@ def test_r1_asset_keywords_and_restored_refs() -> None:
         "计数和派生数一律脚本给出",
         "主控收口三查",
     ):
-        check(kw in readme_tpl, f"assets/任务卡_README.md missing keyword: {kw}")
-    check("| T1 |" not in readme_tpl, "assets/任务卡_README.md must not have real '| T1 |' example row")
+        check(kw in rules_tpl, f"assets/协作规矩.md missing keyword: {kw}")
 
     agents_tpl = (REPO / "assets" / "AGENTS.md").read_text(encoding="utf-8")
     for kw in ("archive_status.py", "环境坑.md", "重开最终交付物", "计数与派生数一律由脚本", "决策登记表_全文.md"):
@@ -898,6 +902,7 @@ def test_041_a10_summary_counts() -> None:
     with tempfile.TemporaryDirectory() as temp:
         line = build(Path(temp))
         # Make line 100% green (0 fails, 0 advisories)
+        write(line / "文档" / "协作规矩.md", (REPO / "assets" / "协作规矩.md").read_text(encoding="utf-8"))
         write(
             line / "文档" / "任务卡" / "T1_初稿.md",
             "# T1\n\n## 进度回写\n- 状态：✅已收口\n",
@@ -1087,12 +1092,14 @@ def test_041_c6_status_template_and_compat() -> None:
 
 
 def test_041_c7_staged_sample_handoff_rule() -> None:
-    """C7: assets/任务卡_README.md 卡面规矩 specifies keeping ⏳ and writing '样张待主控看' (not 🟡) for sample handoffs."""
+    """C7: 协作规矩.md specifies keeping ⏳ and writing '样张待主控看' (not 🟡) for sample handoffs; 任务卡_README.md points to it."""
     readme_tpl = (REPO / "assets" / "任务卡_README.md").read_text(encoding="utf-8")
-    rules_sec = readme_tpl.split("## 卡面规矩", 1)[1].split("## 例行签核提示词", 1)[0]
+    readme_rules_ptr = readme_tpl.split("## 卡面规矩", 1)[1].split("## 例行签核提示词", 1)[0]
+    check("协作规矩.md" in readme_rules_ptr, "assets/任务卡_README.md 卡面规矩 must point to 协作规矩.md")
+    rules_tpl = (REPO / "assets" / "协作规矩.md").read_text(encoding="utf-8")
     check(
-        "样张待主控看" in rules_sec and "⏳" in rules_sec and "🟡" in rules_sec,
-        "assets/任务卡_README.md 卡面规矩 must document staged sample handoff rule (⏳ + 样张待主控看, not 🟡)",
+        "样张待主控看" in rules_tpl and "⏳" in rules_tpl and "🟡" in rules_tpl,
+        "assets/协作规矩.md must document staged sample handoff rule (⏳ + 样张待主控看, not 🟡)",
     )
 
 
@@ -1458,11 +1465,11 @@ def test_041_s8_subprocess_utf8_no_gbk_error() -> None:
 
 
 def test_041_s10_index_template_a011_recent_five() -> None:
-    """S10: assets/任务卡_README.md describes A011 as checking the recent 5 handoff blocks ('最近 5 段')."""
-    readme_tpl = (REPO / "assets" / "任务卡_README.md").read_text(encoding="utf-8")
+    """S10: assets/协作规矩.md describes A011 as checking the recent 5 handoff blocks ('最近 5 段')."""
+    rules_tpl = (REPO / "assets" / "协作规矩.md").read_text(encoding="utf-8")
     check(
-        "最近 5 段交接 ≤800 字" in readme_tpl and "最新交接段 ≤800 字" not in readme_tpl,
-        "assets/任务卡_README.md must state '最近 5 段交接 ≤800 字' for A011",
+        "最近 5 段交接 ≤800 字" in rules_tpl and "最新交接段 ≤800 字" not in rules_tpl,
+        "assets/协作规矩.md must state '最近 5 段交接 ≤800 字' for A011",
     )
 
 
@@ -1635,9 +1642,8 @@ def test_041_r2_s2_inline_placeholder_span_stripping() -> None:
 
 def test_041_r2_s3_top_level_card_state_and_html_comments() -> None:
     """R2-S3: Card state strips fenced blocks and <!-- --> comments, then matches only unindented top-level 状态 line; rules document '状态行顶格写'."""
-    readme_tpl = (REPO / "assets" / "任务卡_README.md").read_text(encoding="utf-8")
-    rules_sec = readme_tpl.split("## 卡面规矩", 1)[1].split("## 例行签核提示词", 1)[0]
-    check("状态行顶格写" in rules_sec, "assets/任务卡_README.md 卡面规矩 must state '状态行顶格写'")
+    rules_tpl = (REPO / "assets" / "协作规矩.md").read_text(encoding="utf-8")
+    check("状态行顶格写" in rules_tpl, "assets/协作规矩.md must state '状态行顶格写'")
 
     with tempfile.TemporaryDirectory() as temp:
         line = build(Path(temp))
@@ -1941,6 +1947,7 @@ def test_042_conv4_config() -> None:
             "# T2\n\n## 进度回写\n- 状态：⬜可派\n\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n",
         )
         write(line / "文档" / "T2_复核_SWE2_2026-09-15.md", "# T2 复核\n\n## 会出错\n无\n\n## 建议\n无\n\nPASS\n")
+        write(line / "文档" / "协作规矩.md", (REPO / "assets" / "协作规矩.md").read_text(encoding="utf-8"))
 
         rc_before, out_before = run(line)
         check(rc_before == 0, f"fixture before rename must pass:\n{out_before}")
@@ -2575,6 +2582,66 @@ def test_042_gate4_fuzz_mutations() -> None:
                 check(not lost_ag, f"Gate4 AGENTS lost lines on {rel}#{it}: {lost_ag[:3]}")
 
 
+def test_050_conv1_collab_rules() -> None:
+    """0.5.0 Conv1: assets/协作规矩.md header/hash/6 sections, pointer in 任务卡_README.md, and A016 missing/version/tamper checks."""
+    rules_fp = ASSETS_DIR / "协作规矩.md"
+    check(rules_fp.is_file(), "assets/协作规矩.md must exist")
+    raw_rules = rules_fp.read_bytes().decode("utf-8")
+    first_ln, sep, _ = raw_rules.replace("\r\n", "\n").partition("\n")
+    m = hl_mod.RULES_HEADER_RE.match(first_ln)
+    check(bool(m and sep), f"assets/协作规矩.md line 1 must match fixed header format, got: {first_ln!r}")
+    decl_ver, decl_sha = m.group(1), m.group(2).lower()
+    check(decl_ver == "0.5.0", f"assets/协作规矩.md line 1 version must be 0.5.0, got: {decl_ver}")
+    actual_sha = hl_mod.compute_rules_body_sha256(raw_rules)
+    check(actual_sha == decl_sha, f"assets/协作规矩.md body sha256 mismatch: header={decl_sha}, actual={actual_sha}")
+
+    doc = hl_mod.parse_markdown(raw_rules)
+    h2_titles = [b.title for b in doc.blocks if b.kind == "heading" and b.level == 2]
+    expected_h2 = list(hl_mod.RULES_REQUIRED_SECTIONS)
+    check(h2_titles == expected_h2, f"assets/协作规矩.md level-2 headings must be exact {expected_h2}, got {h2_titles}")
+
+    readme_txt = (ASSETS_DIR / "任务卡_README.md").read_text(encoding="utf-8")
+    readme_rules_sec = readme_txt.split("## 卡面规矩", 1)[1].split("## 例行签核提示词", 1)[0].strip()
+    non_empty_ptr = [ln for ln in readme_rules_sec.splitlines() if ln.strip() and not ln.startswith("（")]
+    check(
+        len(non_empty_ptr) <= 2 and "文档/协作规矩.md" in readme_rules_sec and "谁改卡面哪里" not in readme_rules_sec,
+        f"assets/任务卡_README.md ## 卡面规矩 must retain only pointer to 文档/协作规矩.md, got:\n{readme_rules_sec}",
+    )
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        # 1. Missing 协作规矩.md -> A016 advisory warn (rc == 0, 0 FAIL)
+        rc_miss, out_miss = run(line)
+        check(
+            rc_miss == 0 and "[A016] ⚠️" in out_miss and "未找到 文档/协作规矩.md" in out_miss,
+            f"missing 协作规矩.md must warn A016 without failing:\n{out_miss}",
+        )
+
+        # 2. Intact 协作规矩.md (both LF and CRLF) -> A016 passes
+        for eol in ("\n", "\r\n"):
+            write_bytes_eol(line / "文档" / "协作规矩.md", raw_rules, eol)
+            rc_ok, out_ok = run(line)
+            check(rc_ok == 0 and "[A016] ✅" in out_ok, f"intact 协作规矩.md ({eol!r}) must pass A016:\n{out_ok}")
+
+        # 3. Version lower than script version (v0.4.0 with valid hash) -> A016 warns '版本低于脚本版本'
+        old_ver_rules = hl_mod.stamp_rules_header(raw_rules, "0.4.0")
+        write(line / "文档" / "协作规矩.md", old_ver_rules)
+        rc_old, out_old = run(line)
+        check(
+            rc_old == 0 and "[A016] ⚠️" in out_old and "版本低于脚本版本" in out_old,
+            f"older rules version must warn A016 '版本低于脚本版本':\n{out_old}",
+        )
+
+        # 4. Modifying 1 character in body -> A016 warns '被改过'
+        tampered = raw_rules.replace("谁改卡面哪里", "谁改卡面何处", 1)
+        write(line / "文档" / "协作规矩.md", tampered)
+        rc_tamp, out_tamp = run(line)
+        check(
+            rc_tamp == 0 and "[A016] ⚠️" in out_tamp and "被改过" in out_tamp,
+            f"1-char modification in 协作规矩.md body must warn A016 '被改过':\n{out_tamp}",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2762,6 +2829,8 @@ def main(argv: list[str] | None = None) -> int:
     test_042_conv1_three_files_and_missing_lib()
     test_042_gate3_syntax_variants()
     test_042_gate4_fuzz_mutations()
+
+    test_050_conv1_collab_rules()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")

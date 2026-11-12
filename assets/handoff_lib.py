@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
@@ -1618,3 +1619,123 @@ def parse_board_items(agents_or_sec4: str) -> list[BoardItem]:
                 )
             )
     return items
+
+
+# =====================================================================
+# Entrypoint 7: 协作规矩文件版本与正文哈希校验 (assets/协作规矩.md)
+# =====================================================================
+
+RULES_FILENAME = "协作规矩.md"
+RULES_HEADER_RE = re.compile(
+    r"^<!--\s*multi-agent-project\s+协作规矩\s+v(\d+\.\d+\.\d+)\s+sha256=([0-9a-fA-F]{64})\s*-->$"
+)
+RULES_REQUIRED_SECTIONS: tuple[str, ...] = (
+    "一、谁改哪里",
+    "二、卡面规矩",
+    "三、通用铁律",
+    "四、执行方须知",
+    "五、复核方须知",
+    "六、主控须知",
+)
+
+
+def parse_semver(ver: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for tok in ver.strip().lstrip("vV").split("."):
+        m = re.match(r"^(\d+)", tok)
+        parts.append(int(m.group(1)) if m else 0)
+    return tuple(parts)
+
+
+def _normalize_rules_text(text: str) -> str:
+    if text.startswith("\ufeff"):
+        text = text[1:]
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def compute_rules_body_sha256(text: str, *, has_header: bool = True) -> str:
+    """Compute SHA-256 of 协作规矩.md body (everything after line 1 when has_header=True, normalized to LF)."""
+    norm = _normalize_rules_text(text)
+    if has_header:
+        _, sep, body = norm.partition("\n")
+        target = body if sep else ""
+    else:
+        target = norm
+    return hashlib.sha256(target.encode("utf-8")).hexdigest()
+
+
+def stamp_rules_header(text: str, version: str) -> str:
+    """Generate or refresh line 1 `<!-- multi-agent-project 协作规矩 vX.Y.Z sha256=<body_hash> -->` with LF."""
+    norm = _normalize_rules_text(text)
+    first_line, sep, rest = norm.partition("\n")
+    if first_line.lstrip().startswith("<!--") and "协作规矩" in first_line:
+        body = rest if sep else ""
+    else:
+        body = norm
+    if body and not body.endswith("\n"):
+        body += "\n"
+    sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    ver_clean = version.strip().lstrip("vV")
+    return f"<!-- multi-agent-project 协作规矩 v{ver_clean} sha256={sha} -->\n{body}"
+
+
+def verify_rules_file(path: Path, min_version: str, display_path: Optional[str] = None) -> tuple[bool, str]:
+    """Verify that <docs_dir>/协作规矩.md exists, version >= min_version, and body SHA-256 matches line 1."""
+    disp = display_path or path.name
+    if not path.is_file():
+        return (
+            False,
+            f"未找到 {disp}（旧项目可运行 python scripts/upgrade.py 升级，新项目请从技能 assets/协作规矩.md 复制）",
+        )
+    try:
+        raw = path.read_bytes().decode("utf-8-sig")
+    except (OSError, UnicodeDecodeError) as exc:
+        return False, f"{disp} 读取失败：{exc}"
+
+    norm = _normalize_rules_text(raw)
+    first_line, sep, body = norm.partition("\n")
+    m = RULES_HEADER_RE.match(first_line.strip())
+    if not m or not sep:
+        return False, f"{disp} 首行缺少标准版本与哈希标记（被改过或格式不符）"
+
+    file_ver, decl_sha = m.group(1), m.group(2).lower()
+    actual_sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    issues: list[str] = []
+    if parse_semver(file_ver) < parse_semver(min_version):
+        issues.append(f"版本低于脚本版本（v{file_ver} < v{min_version.lstrip('vV')}，请运行 python scripts/upgrade.py 更新）")
+    if actual_sha != decl_sha:
+        issues.append(
+            f"正文哈希与第一行不符（被改过：首行 {decl_sha[:12]}… vs 实测 {actual_sha[:12]}…；项目例外请写进 AGENTS.md §5“本项目例外”）"
+        )
+    if issues:
+        return False, f"{disp}：" + "；".join(issues)
+    return True, f"v{file_ver}（sha256={actual_sha[:12]}…）"
+
+
+def _cli_main(argv: Optional[list[str]] = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="handoff_lib 维护工具（生成或校验 协作规矩.md 首行哈希）")
+    parser.add_argument("--stamp-rules", metavar="FILE", help="计算正文 SHA-256 并写入 FILE 第一行（UTF-8 LF）")
+    parser.add_argument("--rules-version", default="0.5.0", help="写入首行的规矩版本号（默认 0.5.0）")
+    parser.add_argument("--verify-rules", metavar="FILE", help="校验 FILE 的首行版本与正文 SHA-256")
+    parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
+    args = parser.parse_args(argv)
+
+    if args.stamp_rules:
+        fp = Path(args.stamp_rules)
+        stamped = stamp_rules_header(fp.read_bytes().decode("utf-8-sig"), args.rules_version)
+        fp.write_bytes(stamped.encode("utf-8"))
+        print(stamped.splitlines()[0])
+        return 0
+    if args.verify_rules:
+        fp = Path(args.verify_rules)
+        ok, msg = verify_rules_file(fp, args.rules_version, display_path=str(fp))
+        print(("PASS: " if ok else "FAIL: ") + msg)
+        return 0 if ok else 1
+    parser.print_help()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli_main())

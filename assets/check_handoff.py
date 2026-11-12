@@ -23,7 +23,7 @@
   H007 至少一个薄指针指向 AGENTS.md（没有薄指针也算通过）
   H008 §4 看板存在且有真实任务行（仅含模板占位行不算）
   H009 TL;DR 日期与 §3 不矛盾（任一方没日期则跳过）
-  A001–A015 只提示不阻断：
+  A001–A016 只提示不阻断：
        A001 决策登记表存在
        A002 多脚本同名口径常量集合一致（只看列表、集合、元组字面量，识别字符串与数字成员；自动排除 *_COLORS 等显示/配色常量，支持 # noqa: A002 豁免）
        A003 入口与任务卡索引体积（AGENTS ≤25KB、STATUS ≤40KB、任务卡索引 ≤15KB）
@@ -39,6 +39,7 @@
        A013 §3.5 决策登记表无重复 ID 且取代链自洽（乙已迁出表外不报）
        A014 AGENTS.md 剩余【待填】按节统计，§5“不可混用的维度”未填单独点名
        A015 任务卡目录存在且非空（缺失或 0 张卡时提示卡类检查未做）
+       A016 协作规矩文件存在、版本不低于脚本版本且正文哈希与首行一致（被改过提示）
 
 根索引检查（--scope index）：
   I001 根 AGENTS.md 存在；I002 声明为索引；I003 表里列出的线级 AGENTS.md 都存在
@@ -963,6 +964,12 @@ def advisories(
     else:
         a015_ok, a015_detail = True, f"{len(cards)} 张任务卡"
     add("A015", "任务卡目录存在且非空", a015_ok, a015_detail, True)
+
+    rules_rel = f"{cfg.docs_dir}/{hl.RULES_FILENAME}"
+    a016_ok, a016_detail = hl.verify_rules_file(
+        root / cfg.docs_dir / hl.RULES_FILENAME, __version__, display_path=rules_rel
+    )
+    add("A016", "协作规矩文件存在、版本匹配且未被改动", a016_ok, a016_detail, True)
 
 
 def index_checks(root: Path) -> None:
