@@ -1025,6 +1025,211 @@ def check_card_role_identity(text: str, role: str) -> tuple[bool, str]:
     return False, f"{role_label}未填全工具/模型/家族"
 
 
+_DEFAULT_STATE_WORDS: dict[str, str] = {
+    "🟠": "待裁定",
+    "⬜": "可派",
+    "⏳": "执行中",
+    "🟡": "待复核",
+    "🔵": "待收口",
+    "✅": "已收口",
+    "⛔": "退回",
+    "🗄": "作废",
+}
+_EMPTY_FAMILY_TOKENS = {"", "unknown", "无", "未填", "待填", "略", "n/a", "na", "none", "-", "—", "--"}
+
+
+@dataclass(frozen=True)
+class CardHeaderInfo:
+    card_id: str
+    task_name: str
+    depends: str
+    artifact_type: str
+    audience: str
+    has_new_header: bool
+
+
+def _clean_header_choice(raw: str) -> str:
+    s = strip_placeholder_spans(raw).strip()
+    # Multi-option template placeholders like 【格式整理｜数据与出图｜分析建模｜头条数字】 are unselected
+    if "｜" in s or "|" in s or PLACEHOLDER_RE.search(raw):
+        return ""
+    s = s.strip(" \t\u3000【】[]<>（）()\"'“”‘’:：;；,，。")
+    if not s or "｜" in s or "|" in s:
+        return ""
+    if s in ("分析/建模", "分析／建模"):
+        return "分析建模"
+    return s
+
+
+def parse_card_header(text: str, fallback_stem: str = "") -> CardHeaderInfo:
+    """Parse 0.5.0 3-line card header (# T<id> <name> / > 依赖：... / > 产物类型：...) with safe fallback for legacy cards."""
+    doc = parse_markdown(text, strip_comments=True)
+    header_blocks: list[Block] = []
+    for b in doc.blocks:
+        if b.kind == "heading" and b.level == 2:
+            break
+        header_blocks.append(b)
+
+    stem_cid = extract_card_id(fallback_stem) if fallback_stem else ""
+    stem_name = fallback_stem.split("_", 1)[1].strip() if "_" in fallback_stem else fallback_stem.strip()
+
+    h1_block = next((b for b in header_blocks if b.kind == "heading" and b.level == 1), None)
+    if h1_block is not None:
+        h1 = h1_block.title.strip()
+        m_h1 = re.match(
+            r"^([A-Za-z]+\d+[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*|T[A-Za-z])(?:[_\s]+|\s*[:：—–\-]\s*|$)(.*)$",
+            h1,
+        )
+        if m_h1:
+            card_id = m_h1.group(1)
+            raw_name = m_h1.group(2).strip()
+            task_name = raw_name if raw_name else (stem_name or card_id)
+        else:
+            card_id = stem_cid
+            task_name = h1 or stem_name or card_id
+    else:
+        card_id = stem_cid
+        task_name = stem_name or card_id
+
+    depends = "—"
+    artifact_type = ""
+    audience = ""
+    has_dep_line = False
+    has_type_line = False
+
+    for b in header_blocks:
+        if b.kind not in ("paragraph", "list_item"):
+            continue
+        for ln in b.visible_lines(include_code=True):
+            s = re.sub(r"^(?:>\s*)+", "", ln).strip()
+            if not s:
+                continue
+            m_dep = re.search(r"(?:^|[\s\u3000；;|｜,，])\**依赖\**\s*[:：]\s*(.*)$", s)
+            if m_dep and not has_dep_line:
+                has_dep_line = True
+                dep_raw = re.split(r"(?:[\s\u3000；;]+|\s*[|｜]\s*)(?=\**(?:产物类型|成品给谁看)\**\s*[:：])", m_dep.group(1))[0]
+                dep_clean = strip_placeholder_spans(dep_raw).strip(" \t\u3000；;。")
+                if dep_clean and not ("【" in dep_clean and "】" in dep_clean and ("分隔" in dep_clean or "卡号" in dep_clean)):
+                    depends = dep_clean
+                else:
+                    depends = "—"
+            m_art = re.search(
+                r"(?:^|[\s\u3000；;|｜,，])\**产物类型\**\s*[:：]\s*(.*?)(?=(?:[\s\u3000；;，,]+|\s*[|｜]\s*)?\**成品给谁看\**\s*[:：]|$)",
+                s,
+            )
+            if m_art and not has_type_line:
+                has_type_line = True
+                artifact_type = _clean_header_choice(m_art.group(1))
+            m_aud = re.search(r"\**成品给谁看\**\s*[:：]\s*(.*?)$", s)
+            if m_aud and not audience:
+                audience = _clean_header_choice(m_aud.group(1))
+
+    return CardHeaderInfo(
+        card_id=card_id,
+        task_name=task_name,
+        depends=depends,
+        artifact_type=artifact_type,
+        audience=audience,
+        has_new_header=bool(has_dep_line and has_type_line),
+    )
+
+
+def parse_card_state_label(text: str) -> tuple[Optional[str], str]:
+    """Return (state_emoji, '符号+紧跟的状态词') from top-level 状态 line inside 进度回写."""
+    doc = parse_markdown(text, strip_comments=True)
+    for b in extract_progress_blocks(doc):
+        if b.kind == "list_item":
+            if b.indent != 0:
+                continue
+            candidates = [(b.visible_lines(include_code=False)[0], b.visible_lines(include_code=True)[0])]
+        elif b.kind == "paragraph":
+            candidates = list(zip(b.visible_lines(include_code=False), b.visible_lines(include_code=True)))
+        else:
+            continue
+
+        for non_code_ln, with_code_ln in candidates:
+            if not non_code_ln or non_code_ln[0] in (" ", "\t", ">"):
+                continue
+            m = CARD_STATE_LINE_RE.match(non_code_ln)
+            if not m:
+                continue
+            src_val = m.group(1)
+            mark = STATE_RE.search(src_val)
+            if not mark:
+                m_full = CARD_STATE_LINE_RE.match(with_code_ln)
+                if m_full:
+                    src_val = m_full.group(1)
+                    mark = STATE_RE.search(src_val)
+            if not mark:
+                return None, ""
+            sym = mark.group(0)
+            disp_sym = "🗄️" if sym == "🗄" else sym
+            tail = src_val[mark.end() :].lstrip("\ufe0f \t*")
+            m_word = re.match(r"^([^\s（(【\[<；;，,。/|`*—–\-]+)", tail)
+            word = m_word.group(1) if m_word else _DEFAULT_STATE_WORDS.get(sym, "")
+            return sym, f"{disp_sym}{word}"
+    return None, ""
+
+
+def extract_card_role_family(text: str, role: str) -> str:
+    """Extract cleaned model family from 执行方 ('executor') or 复核方 ('reviewer') line in 进度回写.
+    Returns '' if missing/empty, or 'UNKNOWN' if explicitly UNKNOWN."""
+    role_label = "执行方" if role == "executor" else "复核方"
+    line_re = re.compile(rf"^(?:[-*+][ \t]+)?\**{role_label}\**[ \t]*[:：](.*)$")
+    doc = parse_markdown(text, strip_comments=True)
+    role_rest: Optional[str] = None
+    for b in extract_progress_blocks(doc):
+        if b.kind == "list_item" and b.indent == 0:
+            cands = b.visible_lines(include_code=True)[:1]
+        elif b.kind == "paragraph":
+            cands = [ln for ln in b.visible_lines(include_code=True) if ln and ln[0] not in (" ", "\t", ">")]
+        else:
+            continue
+        for ln in cands:
+            m = line_re.match(ln.strip())
+            if m:
+                role_rest = m.group(1).strip()
+                break
+        if role_rest is not None:
+            break
+
+    if not role_rest:
+        return ""
+
+    def _clean_fam(v: str) -> str:
+        s = strip_placeholder_spans(v).strip(" \t\u3000—–-:：;；,，。/|.·()（）[]【】<>`'\"")
+        if not s or PLACEHOLDER_RE.search(v):
+            return ""
+        if s.lower() == "unknown":
+            return "UNKNOWN"
+        if s.lower() in _EMPTY_FAMILY_TOKENS:
+            return ""
+        return s
+
+    for key in ("模型家族", "家族"):
+        m_brk = (
+            re.search(rf"{key}\s*【([^【】]*)】", role_rest)
+            or re.search(rf"{key}\s*\[([^\[\]]*)\]", role_rest)
+            or re.search(rf"{key}\s*[（(]([^（）()]*)[）)]", role_rest)
+        )
+        if m_brk is not None:
+            return _clean_fam(m_brk.group(1))
+        m_kv = re.search(rf"{key}\s*[:：]\s*([^/；;，,\n【\[\(（]+)", role_rest)
+        if m_kv is not None:
+            return _clean_fam(m_kv.group(1))
+        m_sp = re.search(rf"{key}\s+([^/；;，,\n【\[\(（]+)", role_rest)
+        if m_sp is not None:
+            return _clean_fam(m_sp.group(1))
+
+    if not any(k in role_rest for k in ("工具", "模型", "家族")):
+        head_clause = re.split(r"[；;]", role_rest)[0]
+        parts = [_clean_fam(p) for p in head_clause.split("/")]
+        parts = [p for p in parts if p]
+        if len(parts) >= 3:
+            return parts[2]
+    return ""
+
+
 def extract_prompt_headings(text: str) -> list[str]:
     doc = parse_markdown(text)
     return [b.title for b in doc.blocks if b.kind == "heading" and PROMPT_TITLE_RE.search(b.title)]

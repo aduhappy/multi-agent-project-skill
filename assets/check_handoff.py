@@ -971,6 +971,40 @@ def advisories(
     )
     add("A016", "协作规矩文件存在、版本匹配且未被改动", a016_ok, a016_detail, True)
 
+    a017_issues: list[str] = []
+    typed_closed_cnt = 0
+    for fp in cards:
+        text = hl.read_utf8(fp)
+        st_mark = hl.parse_card_state(text)
+        if st_mark != "✅":
+            continue
+        hdr = hl.parse_card_header(text, fp.stem)
+        if hdr.artifact_type not in ("分析建模", "头条数字"):
+            continue
+        typed_closed_cnt += 1
+        cid_label = hdr.card_id or fp.stem
+        rev_fam = hl.extract_card_role_family(text, "reviewer")
+        exec_fam = hl.extract_card_role_family(text, "executor")
+        if not rev_fam or rev_fam == "UNKNOWN":
+            a017_issues.append(
+                f"{cid_label}（{hdr.artifact_type}）复核方家族"
+                + ("为 UNKNOWN（不算通过）" if rev_fam == "UNKNOWN" else "为空")
+            )
+        elif hdr.artifact_type == "头条数字":
+            if not exec_fam or exec_fam == "UNKNOWN":
+                a017_issues.append(f"{cid_label}（头条数字）执行方家族为空或 UNKNOWN，无法核验跨家族复核")
+            elif rev_fam.casefold() == exec_fam.casefold():
+                a017_issues.append(f"{cid_label}（头条数字）复核方与执行方同家族（{rev_fam}），须跨模型家族独立复核")
+    add(
+        "A017",
+        "分析建模与头条数字类已收口卡复核方家族合规",
+        not a017_issues,
+        ("；".join(a017_issues[:6]) + ("…" if len(a017_issues) > 6 else ""))
+        if a017_issues
+        else (f"{typed_closed_cnt} 张受检已收口卡合规" if typed_closed_cnt else "暂无标分析建模/头条数字的已收口卡"),
+        True,
+    )
+
 
 def index_checks(root: Path) -> None:
     text = hl.read_utf8(root / "AGENTS.md")

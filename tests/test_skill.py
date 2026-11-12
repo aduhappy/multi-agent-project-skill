@@ -134,7 +134,7 @@ def test_asset_sizes() -> None:
         ("SKILL.md", 15_000),
         ("assets/协作规矩.md", 25_000),
         ("assets/任务卡_README.md", 15_000),
-        ("assets/任务规划_模板.md", 15_000),
+        ("assets/任务卡_模板.md", 6_000),
     ):
         fp = REPO / rel
         size = len(fp.read_bytes())
@@ -512,9 +512,9 @@ def test_r1_asset_keywords_and_restored_refs() -> None:
     for kw in ("archive_status.py", "环境坑.md", "重开最终交付物", "计数与派生数一律由脚本", "决策登记表_全文.md"):
         check(kw in agents_tpl, f"assets/AGENTS.md missing keyword: {kw}")
 
-    card_tpl = (REPO / "assets" / "任务规划_模板.md").read_text(encoding="utf-8")
-    for kw in ("主控在立项前看过什么", "## 会出错", "NEEDS_FIX", "环境坑.md"):
-        check(kw in card_tpl, f"assets/任务规划_模板.md missing keyword: {kw}")
+    card_tpl = (REPO / "assets" / "任务卡_模板.md").read_text(encoding="utf-8")
+    for kw in ("主控在立项前看过什么", "## 会出错", "NEEDS_FIX", "环境坑.md", "文档/协作规矩.md", "产物类型", "成品给谁看"):
+        check(kw in card_tpl, f"assets/任务卡_模板.md missing keyword: {kw}")
 
     adv_ref = (REPO / "references" / "advanced.md").read_text(encoding="utf-8")
     for kw in (
@@ -2642,6 +2642,132 @@ def test_050_conv1_collab_rules() -> None:
         )
 
 
+def test_050_conv2_card_template_and_a017() -> None:
+    """0.5.0 Convention 2: assets/任务卡_模板.md (<=6KB, 3-line header, <=8-line prompts) + A017 reviewer family check."""
+    tpl_path = ASSETS_DIR / "任务卡_模板.md"
+    check(tpl_path.is_file(), "assets/任务卡_模板.md must exist")
+    check(not (ASSETS_DIR / "任务规划_模板.md").exists(), "old assets/任务规划_模板.md must be renamed away")
+
+    readme_root = (REPO / "README.md").read_text(encoding="utf-8")
+    check(
+        "任务规划_模板.md" in readme_root and "任务卡_模板.md" in readme_root,
+        "README.md must retain 1-line note explaining old name 任务规划_模板.md -> 任务卡_模板.md",
+    )
+
+    raw_bytes = tpl_path.read_bytes()
+    check(len(raw_bytes) <= 6_000, f"assets/任务卡_模板.md must be <= 6000B, got {len(raw_bytes)}B")
+    tpl_text = raw_bytes.decode("utf-8")
+    top3 = tpl_text.splitlines()[:3]
+    check(
+        len(top3) == 3
+        and top3[0].startswith("# T1 ")
+        and top3[1].startswith("> 依赖：")
+        and top3[2].startswith("> 产物类型：")
+        and "成品给谁看：" in top3[2],
+        f"assets/任务卡_模板.md must start with fixed 3-line header, got: {top3}",
+    )
+
+    prompts = list(re.finditer(r"````text\n(.*?)\n````", tpl_text, re.S))
+    check(len(prompts) == 2, f"assets/任务卡_模板.md must have exact 2 prompt blocks, got {len(prompts)}")
+    exec_lines = prompts[0].group(1).splitlines()
+    rev_lines = prompts[1].group(1).splitlines()
+    check(len(exec_lines) + 2 <= 8, f"executor prompt must be <= 8 lines (even with fences), got {len(exec_lines) + 2}")
+    check(len(rev_lines) + 2 <= 8, f"reviewer prompt must be <= 8 lines (even with fences), got {len(rev_lines) + 2}")
+    check(
+        any(ln.startswith("先读：文档/协作规矩.md 的执行方须知") for ln in exec_lines),
+        f"executor prompt 先读 must begin with 文档/协作规矩.md 的执行方须知:\n{prompts[0].group(1)}",
+    )
+    check(
+        any(ln.startswith("先读：文档/协作规矩.md 的复核方须知") for ln in rev_lines),
+        f"reviewer prompt 先读 must begin with 文档/协作规矩.md 的复核方须知:\n{prompts[1].group(1)}",
+    )
+
+    # Verify parse_card_header on filled vs template cards
+    hdr_tpl = hl_mod.parse_card_header(tpl_text, "T1_示例")
+    check(hdr_tpl.card_id == "T1" and hdr_tpl.artifact_type == "", f"unfilled template header should leave artifact_type empty: {hdr_tpl}")
+    hdr_filled = hl_mod.parse_card_header(
+        "# T8 OPGD归因\n> 依赖：T2、T7\n> 产物类型：头条数字　成品给谁看：对外\n\n## 进度回写\n- 状态：✅已收口\n",
+        "T8_OPGD归因",
+    )
+    check(
+        hdr_filled.card_id == "T8"
+        and hdr_filled.task_name == "OPGD归因"
+        and hdr_filled.depends == "T2、T7"
+        and hdr_filled.artifact_type == "头条数字"
+        and hdr_filled.audience == "对外",
+        f"filled header parse mismatch: {hdr_filled}",
+    )
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(line / "文档" / "协作规矩.md", (ASSETS_DIR / "协作规矩.md").read_text(encoding="utf-8"))
+        c1 = line / "文档" / "任务卡" / "T1_初稿.md"
+
+        # 1. 分析建模 closed card with empty reviewer family -> A017 warn (rc==0, advisory only)
+        write(
+            c1,
+            "# T1 初稿\n> 依赖：无\n> 产物类型：分析建模　成品给谁看：内部\n\n"
+            "## 进度回写\n- 状态：✅已收口\n"
+            "- 执行方：工具【Codex】/ 模型【GPT-6】/ 家族【OpenAI】\n"
+            "- 复核方：工具【】/ 模型【】/ 家族【】\n",
+        )
+        rc, out = run(line)
+        check(rc == 0 and "[A017] ⚠️" in out and "T1（分析建模）复核方家族为空" in out, f"missing reviewer family on 分析建模 must warn A017:\n{out}")
+
+        # 2. 分析建模 closed card with UNKNOWN reviewer family -> A017 warn
+        write(
+            c1,
+            "# T1 初稿\n> 依赖：无\n> 产物类型：分析建模　成品给谁看：内部\n\n"
+            "## 进度回写\n- 状态：✅已收口\n"
+            "- 执行方：工具【Codex】/ 模型【GPT-6】/ 家族【OpenAI】\n"
+            "- 复核方：工具【Cursor】/ 模型【未知】/ 家族【UNKNOWN】\n",
+        )
+        rc, out = run(line)
+        check(rc == 0 and "[A017] ⚠️" in out and "UNKNOWN" in out, f"UNKNOWN reviewer family must warn A017:\n{out}")
+
+        # 3. 分析建模 closed card with same non-empty family -> A017 passes (cross-family only required for 头条数字)
+        write(
+            c1,
+            "# T1 初稿\n> 依赖：无\n> 产物类型：分析建模　成品给谁看：内部\n\n"
+            "## 进度回写\n- 状态：✅已收口\n"
+            "- 执行方：工具【Codex】/ 模型【GPT-6】/ 家族【OpenAI】\n"
+            "- 复核方：工具【Cursor】/ 模型【GPT-6-mini】/ 家族【OpenAI】\n",
+        )
+        rc, out = run(line)
+        check(rc == 0 and "[A017] ✅" in out, f"分析建模 with non-empty reviewer family must pass A017:\n{out}")
+
+        # 4. 头条数字 closed card with same family (case-insensitive) -> A017 warn
+        write(
+            c1,
+            "# T1 初稿\n> 依赖：无\n> 产物类型：头条数字　成品给谁看：对外\n\n"
+            "## 进度回写\n- 状态：✅已收口\n"
+            "- 执行方：工具【Codex】/ 模型【GPT-6】/ 家族【OpenAI】\n"
+            "- 复核方：工具【Cursor】/ 模型【o4】/ 家族【openai】\n",
+        )
+        rc, out = run(line)
+        check(rc == 0 and "[A017] ⚠️" in out and "同家族" in out, f"头条数字 with same family must warn A017:\n{out}")
+
+        # 5. 头条数字 closed card with cross-family reviewer -> A017 passes
+        write(
+            c1,
+            "# T1 初稿\n> 依赖：无\n> 产物类型：头条数字　成品给谁看：对外\n\n"
+            "## 进度回写\n- 状态：✅已收口\n"
+            "- 执行方：工具【Codex】/ 模型【GPT-6】/ 家族【OpenAI】\n"
+            "- 复核方：工具【Claude Code】/ 模型【GLM-5.3】/ 家族【智谱】\n",
+        )
+        rc, out = run(line)
+        check(rc == 0 and "[A017] ✅" in out, f"头条数字 with cross-family reviewer must pass A017:\n{out}")
+
+        # 6. Deprecated 🗄️ or active ⏳ 头条数字 card without reviewer -> A017 skips (passes)
+        write(
+            c1,
+            "# T1 初稿\n> 依赖：无\n> 产物类型：头条数字　成品给谁看：对外\n\n"
+            "## 进度回写\n- 状态：🗄️作废\n- 执行方：略\n- 复核方：\n",
+        )
+        rc, out = run(line)
+        check(rc == 0 and "[A017] ✅" in out, f"deprecated 🗄️ card must not trigger A017:\n{out}")
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2831,6 +2957,7 @@ def main(argv: list[str] | None = None) -> int:
     test_042_gate4_fuzz_mutations()
 
     test_050_conv1_collab_rules()
+    test_050_conv2_card_template_and_a017()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")

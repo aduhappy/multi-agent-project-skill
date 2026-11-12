@@ -93,7 +93,8 @@ git clone https://github.com/aduhappy/multi-agent-project-skill.git .agents/skil
 
 ## 只要模板文件，不要 skill
 
-不想装成 skill、只想要骨架文件？直接复制 [`assets/`](assets/) 目录下的模板与脚本到你的项目（单线拷 `assets/AGENTS.md`，多线课题根拷 `assets/ROOT_AGENTS.md`；任务卡与索引拷 `assets/任务规划_模板.md`、`assets/任务卡_README.md`；自检与归档脚本一起拷 `assets/handoff_lib.py`、`assets/check_handoff.py`、`assets/archive_status.py` 三个文件到 `scripts/`）。
+不想装成 skill、只想要骨架文件？直接复制 [`assets/`](assets/) 目录下的模板与脚本到你的项目（单线拷 `assets/AGENTS.md`，多线课题根拷 `assets/ROOT_AGENTS.md`；协作规矩、任务卡与索引拷 `assets/协作规矩.md`、`assets/任务卡_模板.md`、`assets/任务卡_README.md`；脚本拷 `assets/handoff_lib.py`、`assets/check_handoff.py`、`assets/archive_status.py` 等到 `scripts/`）。
+> 旧名说明：0.5.0 起 `assets/任务规划_模板.md` 改名为 `assets/任务卡_模板.md`。
 
 > ⚠️ 中文文件名注意：如果你的 toolchain 对中文路径挑剔，在**你自己的项目里**改用 ASCII 文件名并更新线级入口指针；不要改变本 skill 的安装目录 `multi-agent-project`。
 
