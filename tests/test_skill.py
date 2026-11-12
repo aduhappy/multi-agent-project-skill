@@ -3130,7 +3130,7 @@ def test_050_conv6_extras_and_t13d() -> None:
     gitattr = (REPO / ".gitattributes").read_text(encoding="utf-8")
     check("*.py text eol=lf" in gitattr and "*.md text eol=lf" in gitattr, f".gitattributes must enforce eol=lf:\n{gitattr}")
     for p in list(REPO.rglob("*.py")) + list(REPO.rglob("*.md")):
-        if ".git" in p.parts:
+        if ".git" in p.parts or ".pytest_cache" in p.parts:
             continue
         check(b"\r\n" not in p.read_bytes(), f"{p.relative_to(REPO)} must use LF line endings (no CRLF)")
 
@@ -3582,8 +3582,8 @@ def test_051_conv1_legacy_cards() -> None:
             "## 进度回写\n- 状态：✅已收口\n",
         )
         write(
-            cards_dir / "TA_字母编号清洗.md",
-            "# 【TA】字母卡号旧卡带未转义竖线备注测试\n\n"
+            cards_dir / "T10h_字母后缀清洗.md",
+            "# 【T10h】字母后缀旧卡带未转义竖线备注测试\n\n"
             "## 进度回写\n- 状态：✅已收口\n",
         )
 
@@ -3600,7 +3600,7 @@ def test_051_conv1_legacy_cards() -> None:
             "| T13a | 文档处理与画图工具实测评估（技能升级专项） | ✅已收口（报告 `文档/工具评估/`） | 无 | `任务卡/T13a_文档与画图工具评估.md` |\n"
             "| T13b | multi-agent-project 技能升级 0.4.0（技能升级专项） | ✅已收口（11-10 推送 1718779） | 无 | `任务卡/T13b_multi-agent-project技能0.4.0升级.md` |\n"
             "| T13f | multi-agent-project 技能 0.5.1 旧卡兼容（看板生成读旧卡） | ⬜可派 | T13e | `任务卡/T13f_multi-agent-project技能0.5.1旧卡兼容.md` |\n"
-            "| TA | 字母编号数据清洗 | ✅已收口（方案A | 方案B） | T1a | `任务卡/TA_字母编号清洗.md` |\n"
+            "| T10h | 字母后缀数据清洗 | ✅已收口（方案A | 方案B） | T1a | `任务卡/T10h_字母后缀清洗.md` |\n"
             "<!-- cards:end -->\n"
         )
         write(line / "文档" / "任务卡_README.md", handwritten_index)
@@ -3619,12 +3619,12 @@ def test_051_conv1_legacy_cards() -> None:
             "| T1a | NAS 已有数据盘点 | ✅已收口 | 无 | `任务卡/T1a_NAS已有数据盘点.md` |",
             "| T1d | GEE 取 LGRIP30 灌溉耕地（旁证） | 🗄️作废（D-21） | T1b | `任务卡/T1d_GEE取LGRIP30灌溉耕地.md` |",
             "| T5c | 土壤保持 SDR（K 顺序更正） | ✅已收口（中间产物，由 T5d 接续） | T5b 输入 | `任务卡/T5c_土壤保持SDR.md` |",
+            "| T10h | 字母后缀数据清洗 | ✅已收口（方案A \\| 方案B） | T1a | `任务卡/T10h_字母后缀清洗.md` |",
             "| T12f | 汇报 PPT 补内容二措施库页两图（措施分布图＋类型统计图） | 🔵待收口（已发老师\\|待确认） | T1c | `任务卡/T12f_内容二措施库页两图.md` |",
             "| T13a | 文档处理与画图工具实测评估（技能升级专项） | ✅已收口（报告 `文档/工具评估/`） | 无 | `任务卡/T13a_文档与画图工具评估.md` |",
             "| T13b | multi-agent-project 技能升级 0.4.0（技能升级专项） | ✅已收口（11-10 推送 1718779） | 无 | `任务卡/T13b_multi-agent-project技能0.4.0升级.md` |",
             "| T13f | 把 multi-agent-project 修到 0.5.1：看板生成能用在旧卡上，升级补备份，收掉复查留下的 4 条 | ⏳执行中 | T13e | `任务卡/T13f_multi-agent-project技能0.5.1旧卡兼容.md` |",
             "| T99 | 索引外新增旧卡 | ✅已收口 | — | `任务卡/T99_索引外新增旧卡.md` |",
-            "| TA | 字母编号数据清洗 | ✅已收口（方案A \\| 方案B） | T1a | `任务卡/TA_字母编号清洗.md` |",
         ]
         for exp_r in expected_rows:
             check(exp_r in gen_idx, f"Conv1 missing expected generated row:\n  expected: {exp_r}\n  got:\n{gen_idx}")
@@ -3974,6 +3974,279 @@ def test_051_conv5_r1_four_suggestions() -> None:
         )
 
 
+def test_051_r1_g1_card_id_and_mismatch() -> None:
+    """0.5.1 R1 G1: Card ID only accepts 'T + digits + optional letter suffix'; TODO/TIP/TBD/TA in H1 never hijack card ID; H1 vs filename mismatch uses filename and prompts."""
+    sync_script = ASSETS_DIR / "sync_board.py"
+    upg_script = ASSETS_DIR / "upgrade.py"
+
+    def run_sb(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(sync_script), str(target), *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        cards_dir = line / "文档" / "任务卡"
+        cards_dir.mkdir(parents=True, exist_ok=True)
+
+        # Exact review report samples (`会出错 1`): T9x (`# TODO 待办说明写法`) & T9y (`# TIP 普通开头`)
+        write(
+            cards_dir / "T9x_T字单词劫持.md",
+            "# TODO 待办说明写法\n\n## 进度回写\n- 状态：⬜可派\n",
+        )
+        write(
+            cards_dir / "T9y_普通开头.md",
+            "# TIP 普通开头\n\n## 进度回写\n- 状态：⬜可派\n",
+        )
+        # Near variants: bracketed T-words (`# 【TBD】...`, `# （TA）...`), `# TOP：...` with new header, plus real letter-suffixed IDs `T12a` / `T10h`
+        write(
+            cards_dir / "T12a_老师结构版.md",
+            "# 【TBD】待定方案说明但真卡号是T12a\n\n## 进度回写\n- 状态：✅已收口\n",
+        )
+        write(
+            cards_dir / "T10h_图集子卡.md",
+            "# （TA）T1–T9 阶段图集汇总\n\n## 进度回写\n- 状态：✅已收口\n",
+        )
+        write(
+            cards_dir / "T9z_置顶新卡头.md",
+            "# TOP：置顶新卡头说明\n> 依赖：T12a\n\n## 进度回写\n- 状态：⏳执行中\n",
+        )
+        # H1 card ID disagrees with filename card ID -> filename wins + prompt on stderr
+        write(
+            cards_dir / "T20a_真文件名卡号.md",
+            "# T20b 一级标题误写成另一个卡号\n\n## 进度回写\n- 状态：✅已收口\n",
+        )
+        write(
+            cards_dir / "T21_括号错卡号.md",
+            "# 【T99】括号内卡号与文件名不一致\n> 依赖：T20a\n\n## 进度回写\n- 状态：✅已收口\n",
+        )
+
+        idx_txt = (
+            "# 任务卡索引\n\n## 任务卡清单\n"
+            "<!-- cards:start -->\n"
+            "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n"
+            "|---|---|---|---|---|\n"
+            "| T9x | T9x索引任务名 | ⏳执行中（T9x索引备注） | T1a | `任务卡/T9x_T字单词劫持.md` |\n"
+            "| T9y | T9y索引任务名 | ⬜可派（T9y索引备注） | T50 | `任务卡/T9y_普通开头.md` |\n"
+            "| T10h | 图集代表子卡 | ✅已收口（D-57） | T10a | `任务卡/T10h_图集子卡.md` |\n"
+            "| T12a | 老师结构版改写 | ✅已收口 | T10g | `任务卡/T12a_老师结构版.md` |\n"
+            "| T20a | 文件名卡号优先任务 | ✅已收口（保住T20a备注） | T12a | `任务卡/T20a_真文件名卡号.md` |\n"
+            "<!-- cards:end -->\n"
+        )
+        write(line / "文档" / "任务卡_README.md", idx_txt)
+
+        res = run_sb(line)
+        check(res.returncode == 0, f"G1 sync_board failed:\n{res.stdout}\n{res.stderr}")
+        gen = (line / "文档" / "任务卡_README.md").read_text(encoding="utf-8")
+
+        for must_have in (
+            "| T9x | T9x索引任务名 | ⬜可派（T9x索引备注） | T1a | `任务卡/T9x_T字单词劫持.md` |",
+            "| T9y | T9y索引任务名 | ⬜可派（T9y索引备注） | T50 | `任务卡/T9y_普通开头.md` |",
+            "| T9z | TOP：置顶新卡头说明 | ⏳执行中 | T12a | `任务卡/T9z_置顶新卡头.md` |",
+            "| T10h | 图集代表子卡 | ✅已收口（D-57） | T10a | `任务卡/T10h_图集子卡.md` |",
+            "| T12a | 老师结构版改写 | ✅已收口 | T10g | `任务卡/T12a_老师结构版.md` |",
+            "| T20a | 文件名卡号优先任务 | ✅已收口（保住T20a备注） | T12a | `任务卡/T20a_真文件名卡号.md` |",
+            "| T21 | 括号内卡号与文件名不一致 | ✅已收口 | T20a | `任务卡/T21_括号错卡号.md` |",
+        ):
+            check(must_have in gen, f"G1 missing expected row:\n  expected: {must_have}\n  got:\n{gen}")
+
+        for forbidden_id in ("| TODO |", "| TIP |", "| TBD |", "| TA |", "| TOP |", "| T20b |", "| T99 |", "| T1 |"):
+            check(forbidden_id not in gen, f"G1 hijacked card ID {forbidden_id} appeared in generated table:\n{gen}")
+
+        check(
+            "T20a_真文件名卡号.md" in res.stderr
+            and "T20b" in res.stderr
+            and "已以文件名卡号「T20a」为准" in res.stderr
+            and "T21_括号错卡号.md" in res.stderr
+            and "T99" in res.stderr
+            and "已以文件名卡号「T21」为准" in res.stderr,
+            f"G1 must prompt when H1 card ID != filename card ID:\n{res.stderr}",
+        )
+        check(
+            "T9x_T字单词劫持.md" not in res.stderr and "T9y_普通开头.md" not in res.stderr,
+            f"G1 must not treat TODO/TIP as mismatched card IDs:\n{res.stderr}",
+        )
+
+        # Also verify `--migrate-card-heads` uses filename card ID `T20a` and emits the same mismatch prompt
+        r_mig = subprocess.run(
+            [sys.executable, "-B", str(upg_script), str(line), "--migrate-card-heads", "--today", TODAY],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(
+            r_mig.returncode == 0
+            and "[T20a]" in r_mig.stdout
+            and "[T9x]" in r_mig.stdout
+            and "[TODO]" not in r_mig.stdout
+            and "已以文件名卡号「T20a」为准" in r_mig.stderr,
+            f"G1 --migrate-card-heads mismatch:\nstdout={r_mig.stdout}\nstderr={r_mig.stderr}",
+        )
+
+
+def test_051_r1_g2_column_mismatch_fallback() -> None:
+    """0.5.1 R1 G2: Index row whose column count still differs from header after paren-rejoin warns line # + extra/missing cells, writes whole table, and falls back to card header / filename."""
+    sync_script = ASSETS_DIR / "sync_board.py"
+
+    def run_sb(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(sync_script), str(target), *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        cards_dir = line / "文档" / "任务卡"
+        cards_dir.mkdir(parents=True, exist_ok=True)
+
+        # Normal control card
+        write(
+            cards_dir / "T1a_正常对照.md",
+            "# T1a 一句很长的旧卡说明\n\n## 进度回写\n- 状态：✅已收口\n",
+        )
+        # Exact review report sample (`会出错 2`): bare `|` outside closed parens -> 6 cells (`多了 1 格`), legacy card falls back to filename
+        write(
+            cards_dir / "T8c_竖线裸奔.md",
+            "# T8c 生态产品归因长句说明但没有新卡头依赖行\n\n## 进度回写\n- 状态：✅已收口\n",
+        )
+        # Near variant 1: bare `|` inside 任务名 cell -> 6 cells (`多了 1 格`), card has new header -> falls back to card header
+        write(
+            cards_dir / "T8d_卡头兜底.md",
+            "# T8d 卡头标准任务名\n> 依赖：T1a\n\n## 进度回写\n- 状态：✅已收口\n",
+        )
+        # Near variant 2: missing 1 column (4 cells instead of 5 -> `少了 1 格`), legacy card -> falls back to filename & '—' (never leaks file path into 依赖!)
+        write(
+            cards_dir / "T8e_少一格兜底.md",
+            "# T8e 少了一列的旧卡长标题说明\n\n## 进度回写\n- 状态：✅已收口\n",
+        )
+
+        # Line numbers in 任务卡_README.md:
+        # 1: # 索引
+        # 2: (blank)
+        # 3: ## 任务卡清单
+        # 4: <!-- cards:start -->
+        # 5: | 编号 | 任务名 | 状态 | 依赖 | 文件 |
+        # 6: |---|---|---|---|---|
+        # 7: T1a (5 cols - ok)
+        # 8: T8c (6 cols - 多了 1 格)
+        # 9: T8d (6 cols - 多了 1 格)
+        # 10: T8e (4 cols - 少了 1 格)
+        idx_txt = (
+            "# 索引\n\n"
+            "## 任务卡清单\n"
+            "<!-- cards:start -->\n"
+            "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n"
+            "|---|---|---|---|---|\n"
+            "| T1a | 索引里的正常短名 | ✅已收口 | 无 | `任务卡/T1a_正常对照.md` |\n"
+            "| T8c | 竖线在括号外 | ✅已收口（备注）|尾巴 | — | `任务卡/T8c_竖线裸奔.md` |\n"
+            "| T8d | 前半名|后半名 | ✅已收口（T8d备注） | 错位依赖 | `任务卡/T8d_卡头兜底.md` |\n"
+            "| T8e | 少列手写名 | ✅已收口（少列备注） | `任务卡/T8e_少一格兜底.md` |\n"
+            "<!-- cards:end -->\n"
+        )
+        write(line / "文档" / "任务卡_README.md", idx_txt)
+
+        res = run_sb(line)
+        # Pitfall 2: MUST NOT refuse to write the whole table (rc == 0)
+        check(res.returncode == 0, f"G2 must prompt and fall back without refusing to write table:\n{res.stdout}\n{res.stderr}")
+        gen = (line / "文档" / "任务卡_README.md").read_text(encoding="utf-8")
+
+        check(
+            "第 8 行" in res.stderr and "T8c" in res.stderr and "多了 1 格" in res.stderr
+            and "第 9 行" in res.stderr and "T8d" in res.stderr and "多了 1 格" in res.stderr
+            and "第 10 行" in res.stderr and "T8e" in res.stderr and "少了 1 格" in res.stderr,
+            f"G2 must warn exact line numbers and extra/missing cell counts:\n{res.stderr}",
+        )
+        check("第 7 行" not in res.stderr, f"G2 must not warn on valid 5-col row T1a:\n{res.stderr}")
+
+        for exp_row in (
+            "| T1a | 索引里的正常短名 | ✅已收口 | 无 | `任务卡/T1a_正常对照.md` |",
+            "| T8c | 竖线裸奔 | ✅已收口（备注） | — | `任务卡/T8c_竖线裸奔.md` |",
+            "| T8d | 卡头标准任务名 | ✅已收口（T8d备注） | T1a | `任务卡/T8d_卡头兜底.md` |",
+            "| T8e | 少一格兜底 | ✅已收口（少列备注） | — | `任务卡/T8e_少一格兜底.md` |",
+        ):
+            check(exp_row in gen, f"G2 expected fallback row missing:\n  expected: {exp_row}\n  got:\n{gen}")
+
+        check("尾巴" not in gen and "竖线在括号外" not in gen and "少列手写名" not in gen, f"G2 leaked positional value from broken row:\n{gen}")
+
+
+def test_051_r1_suggestions_3_4_7() -> None:
+    """0.5.1 R1 Suggestions 3, 4, 7: Unclaimed index row prompts (T11 placeholder & file-col typo), card-vs-index state note diff prompt (T12h), and CHANGELOG/upgrade note."""
+    sync_script = ASSETS_DIR / "sync_board.py"
+    upg_script = ASSETS_DIR / "upgrade.py"
+
+    def run_sb(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(sync_script), str(target), *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        cards_dir = line / "文档" / "任务卡"
+        cards_dir.mkdir(parents=True, exist_ok=True)
+
+        # T1a: card has NO state parens, index HAS remark -> normal steady state, must NOT emit Suggestion 4 prompt
+        write(cards_dir / "T1a_盘点.md", "# T1a 盘点\n\n## 进度回写\n- 状态：✅已收口\n")
+        # T12h: card state parens != index remark (real Ningxia project case!) -> must prompt naming T12h, keep index remark, and pass --check
+        write(cards_dir / "T12h_图集正式版.md", "# T12h 图集正式版\n\n## 进度回写\n- 状态：🔵待收口（独立复核 PASS）\n")
+        # T66 & T77: index row T66 mistakenly points its file column to `任务卡/T77_孤儿卡.md` (exact review Suggestion 3 case)
+        write(cards_dir / "T66_文件指错.md", "# T66 文件指错长标题\n\n## 进度回写\n- 状态：⬜可派\n")
+        write(cards_dir / "T77_孤儿卡.md", "# T77 孤儿卡长标题\n\n## 进度回写\n- 状态：⬜可派\n")
+
+        idx_txt = (
+            "# 索引\n\n## 任务卡清单\n"
+            "<!-- cards:start -->\n"
+            "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n"
+            "|---|---|---|---|---|\n"
+            "| T1a | NAS 盘点 | ✅已收口（11-06 收口） | 无 | `任务卡/T1a_盘点.md` |\n"
+            "| T11 | 二期扩展 | ⬜未建卡（等老师反馈） | T10 | — |\n"
+            "| T12h | 图集正式版 | 🔵待收口（复核 NEEDS_FIX，图 2-10；用户另行处理） | T12g | `任务卡/T12h_图集正式版.md` |\n"
+            "| T66 | T66手写短名 | ⬜可派 | T1a | `任务卡/T77_孤儿卡.md` |\n"
+            "<!-- cards:end -->\n"
+        )
+        write(line / "文档" / "任务卡_README.md", idx_txt)
+
+        res = run_sb(line)
+        check(res.returncode == 0, f"Suggestions 3/4 sync_board failed:\n{res.stderr}")
+        gen = (line / "文档" / "任务卡_README.md").read_text(encoding="utf-8")
+
+        # Suggestion 3: both unclaimed rows (`T11` placeholder and `T66` pointing to `T77_孤儿卡.md`) prompted line by line
+        check(
+            "第 8 行" in res.stderr and "T11" in res.stderr and "无任何任务卡认领" in res.stderr
+            and "第 10 行" in res.stderr and "T66" in res.stderr and "T77_孤儿卡.md" in res.stderr,
+            f"Suggestion 3 must prompt each unclaimed index row:\n{res.stderr}",
+        )
+        # Suggestion 4: T12h prompted, T1a NOT prompted, index remark kept, and --check exits 0
+        check(
+            "T12h（T12h_图集正式版.md）" in res.stderr
+            and "（独立复核 PASS）" in res.stderr
+            and "（复核 NEEDS_FIX，图 2-10；用户另行处理）" in res.stderr
+            and "T1a_盘点.md" not in res.stderr,
+            f"Suggestion 4 prompt mismatch:\n{res.stderr}",
+        )
+        check(
+            "| T12h | 图集正式版 | 🔵待收口（复核 NEEDS_FIX，图 2-10；用户另行处理） | T12g | `任务卡/T12h_图集正式版.md` |" in gen,
+            f"T12h row must preserve index remark:\n{gen}",
+        )
+        r_chk = run_sb(line, "--check")
+        check(r_chk.returncode == 0, f"Suggestion 4 prompt must not fail --check once synced:\n{r_chk.stdout}\n{r_chk.stderr}")
+
+        # Suggestion 7: exact phrase in CHANGELOG.md and upgrade.py outputs
+        req_phrase = "状态备注只存在索引表里，回写卡头不带它"
+        changelog_txt = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+        check(req_phrase in changelog_txt, f"Suggestion 7 phrase missing in CHANGELOG.md")
+
+        r_upg = subprocess.run(
+            [sys.executable, "-B", str(upg_script), str(line), "--skill-dir", str(ASSETS_DIR), "--today", TODAY],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        r_mig = subprocess.run(
+            [sys.executable, "-B", str(upg_script), str(line), "--migrate-card-heads", "--today", TODAY],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(req_phrase in r_upg.stdout, f"Suggestion 7 phrase missing in upgrade.py output:\n{r_upg.stdout}")
+        check(req_phrase in r_mig.stdout, f"Suggestion 7 phrase missing in upgrade.py --migrate-card-heads output:\n{r_mig.stdout}")
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -4177,6 +4450,9 @@ def main(argv: list[str] | None = None) -> int:
     test_051_conv3_backup_agents_md()
     test_051_conv4_sec35_migration_hint()
     test_051_conv5_r1_four_suggestions()
+    test_051_r1_g1_card_id_and_mismatch()
+    test_051_r1_g2_column_mismatch_fallback()
+    test_051_r1_suggestions_3_4_7()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")

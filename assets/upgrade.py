@@ -659,7 +659,12 @@ def migrate_card_headers(
 
     idx_fp = root / cfg.index_file
     idx_bytes = idx_fp.read_bytes() if idx_fp.is_file() else b""
-    idx_by_id, idx_by_id_file = sb.parse_existing_index_cards(idx_bytes)
+    notices: list[str] = []
+    idx_by_id, idx_by_id_file = sb.parse_existing_index_cards(
+        idx_bytes,
+        index_disp=cfg.index_file,
+        notices_out=notices,
+    )
 
     raw_cards = sorted(fp for fp in cards_dir.glob("*.md") if "复核" not in fp.stem)
     parsed_cards: list[tuple[Path, bytes, hl.CardHeaderInfo, str]] = []
@@ -667,8 +672,17 @@ def migrate_card_headers(
         orig_bytes = fp.read_bytes()
         text = orig_bytes.decode("utf-8-sig")
         hdr = hl.parse_card_header(text, fp.stem)
+        stem_valid_cid = hl.extract_valid_card_id(fp.stem)
         cid = (hdr.card_id or hl.extract_card_id(fp.stem)).strip()
+        if hdr.cid_mismatch and stem_valid_cid and hdr.h1_card_id:
+            notices.append(
+                f"提示：{fp.name} 一级标题卡号「{hdr.h1_card_id}」与文件名卡号「{stem_valid_cid}」不一致，"
+                f"已以文件名卡号「{stem_valid_cid}」为准"
+            )
         parsed_cards.append((fp, orig_bytes, hdr, cid))
+
+    for msg in notices:
+        print(msg, file=sys.stderr)
 
     parsed_cards.sort(key=lambda item: sb.natural_card_sort_key(item[3], item[0].name))
     idx_row_map = sb.match_cards_to_index_rows(
@@ -903,7 +917,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument(
         "--migrate-card-heads",
         action="store_true",
-        help="可选：为旧格式任务卡补写两行卡头（默认只预览；加 --apply 先备份原卡再插入两行，其余字节不动）",
+        help="可选：为旧格式任务卡补写两行卡头（默认只预览；加 --apply 先备份原卡再插入两行，其余字节不动；状态备注只存在索引表里，回写卡头不带它）",
     )
     parser.add_argument("--skill-dir", help="技能仓库根目录或 assets/ 目录（自动探测不到时指定）")
     parser.add_argument("--today", help="备份目录日期覆盖 YYYY-MM-DD（仅测试用）")
@@ -932,6 +946,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"=== {m_mode} | 目标：{root} ===")
         if not mrep.items:
             print(f"待补卡头旧卡：0 张（跳过已有新卡头 {mrep.skipped_new_cards} 张，无需改动）。")
+            print("说明：状态备注只存在索引表里，回写卡头不带它（请勿清空索引表已有行的状态备注）。")
             return 0
         verb = "已插入两行卡头" if mrep.applied else "待插入两行卡头"
         print(f"{verb}（共 {len(mrep.items)} 张旧卡；跳过已有新卡头 {mrep.skipped_new_cards} 张）：")
@@ -945,6 +960,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             )
         else:
             print(f"写盘前将把原卡复制进：{cfg.docs_dir}/_作废/升级前_{cur_day.isoformat()}/（只插入上述两行卡头，不动卡内其他任何字节）")
+        print("说明：状态备注只存在索引表里，回写卡头不带它（若清空索引表重建，手写状态备注将无法从卡头恢复）。")
         return 0
 
     try:
@@ -1055,6 +1071,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             f"按 §3.5 规矩把决策表全文迁到 `{cfg.docs_dir}/决策记录/决策登记表_全文.md`，原处改留短行索引。"
         )
     print("注：第 1 条仅按字面短语匹配，§5 中措辞相近的重复条目请主控自查。")
+    print("提示：如需为旧卡补写两行卡头可另跑 `upgrade.py --migrate-card-heads`（注意：状态备注只存在索引表里，回写卡头不带它）。")
     return 0
 
 

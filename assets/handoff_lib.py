@@ -879,11 +879,26 @@ def pointer_ok(text: str) -> bool:
 # =====================================================================
 
 
+CARD_ID_RE = re.compile(r"^[Tt]\d+[A-Za-z]*$")
+_CARD_ID_TOKEN = r"[Tt]\d+[A-Za-z]*(?![A-Za-z0-9])"
+
+
+def is_valid_card_id(cid: str) -> bool:
+    """True iff `cid` matches 'T + digits + optional letter suffix' (e.g. T1, T12a, T10h)."""
+    return bool(cid and CARD_ID_RE.fullmatch(cid.strip()))
+
+
 def extract_card_id(stem: str) -> str:
     if "_" in stem:
         return stem.split("_")[0]
-    m = re.match(r"^([A-Za-z]+\d+[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*|T[A-Z]{1,3}(?![A-Za-z0-9]))", stem)
+    m = re.match(rf"^({_CARD_ID_TOKEN})", stem)
     return m.group(1) if m else stem
+
+
+def extract_valid_card_id(stem: str) -> str:
+    """Return valid card ID ('T' + digits + optional letter suffix) from filename stem, or '' if absent."""
+    cand = extract_card_id(stem).strip()
+    return cand if is_valid_card_id(cand) else ""
 
 
 def collect_active_card_ids(root: Path, cfg: HandoffConfig) -> list[str]:
@@ -1082,6 +1097,8 @@ class CardHeaderInfo:
     has_dep_line: bool = False
     has_type_line: bool = False
     h1_task_name: str = ""
+    h1_card_id: str = ""
+    cid_mismatch: bool = False
 
 
 def _clean_header_choice(raw: str) -> str:
@@ -1097,10 +1114,10 @@ def _clean_header_choice(raw: str) -> str:
     return s
 
 
-_H1_CARD_ID_TOKEN = r"[A-Za-z]+\d+[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*|T[A-Z]{1,3}(?![A-Za-z0-9])"
+_H1_CARD_ID_TOKEN = _CARD_ID_TOKEN
 _H1_CARD_HEAD_RE = re.compile(
-    rf"^(?:[【\[（(]\s*(?P<b_cid>{_H1_CARD_ID_TOKEN})\s*[】\]）)](?:[_\s]+|\s*[:：—–\-]\s*)?(?P<b_rest>.*)$"
-    rf"|(?P<u_cid>{_H1_CARD_ID_TOKEN})(?:[_\s]+|\s*[:：—–\-]\s*|(?=[^\x00-\x7F]|[（(【\[]|$))(?P<u_rest>.*)$)"
+    rf"^(?:[*`]*[【\[（(]\s*[*`]*(?P<b_cid>{_H1_CARD_ID_TOKEN})[*`]*\s*[】\]）)][*`]*(?:[_\s]+|\s*[:：—–\-]+\s*)?(?P<b_rest>.*)$"
+    rf"|[*`]*(?P<u_cid>{_H1_CARD_ID_TOKEN})[*`]*(?:[_\s]+|\s*[:：]\s*|\s+[—–\-]+\s*|[—–\-]+(?![Tt]?\d)\s*|(?=[\u4e00-\u9fff（(【\[]|$))(?P<u_rest>.*)$)"
 )
 
 
@@ -1113,36 +1130,35 @@ def parse_card_header(text: str, fallback_stem: str = "") -> CardHeaderInfo:
             break
         header_blocks.append(b)
 
-    stem_cid = extract_card_id(fallback_stem) if fallback_stem else ""
+    stem_valid_cid = extract_valid_card_id(fallback_stem) if fallback_stem else ""
     stem_name = fallback_stem.split("_", 1)[1].strip() if "_" in fallback_stem else fallback_stem.strip()
 
     h1_block = next((b for b in header_blocks if b.kind == "heading" and b.level == 1), None)
     h1_task_name = ""
+    h1_cid = ""
+    cid_mismatch = False
     if h1_block is not None:
         h1 = h1_block.title.strip()
         m_h1 = _H1_CARD_HEAD_RE.match(h1)
-        raw_cid = (m_h1.group("b_cid") or m_h1.group("u_cid")) if m_h1 else ""
-        # Accept H1 token as card_id unless fallback_stem has an explicit '_' prefix of a non-T card and H1 started with an unrelated word+digit (e.g. GEE2020)
-        accept_h1_cid = bool(
-            raw_cid
-            and (
-                not stem_cid
-                or "_" not in fallback_stem
-                or raw_cid.casefold() == stem_cid.casefold()
-                or raw_cid[0] in ("T", "t")
-            )
-        )
-        if m_h1 and accept_h1_cid:
-            card_id = raw_cid
+        h1_cid = ((m_h1.group("b_cid") or m_h1.group("u_cid")).strip()) if m_h1 else ""
+        if m_h1 and h1_cid:
             raw_name = (m_h1.group("b_rest") if m_h1.group("b_cid") else m_h1.group("u_rest")).strip()
             h1_task_name = raw_name
+            if stem_valid_cid and h1_cid.casefold() != stem_valid_cid.casefold():
+                card_id = stem_valid_cid
+                cid_mismatch = True
+            elif not stem_valid_cid and fallback_stem.strip():
+                card_id = h1_cid
+                cid_mismatch = True
+            else:
+                card_id = stem_valid_cid or h1_cid
             base_task_name = raw_name if raw_name else (stem_name or card_id)
         else:
-            card_id = stem_cid
+            card_id = stem_valid_cid
             h1_task_name = h1
             base_task_name = h1 or stem_name or card_id
     else:
-        card_id = stem_cid
+        card_id = stem_valid_cid
         base_task_name = stem_name or card_id
 
     depends = "—"
@@ -1204,6 +1220,8 @@ def parse_card_header(text: str, fallback_stem: str = "") -> CardHeaderInfo:
         has_dep_line=has_dep_line,
         has_type_line=has_type_line,
         h1_task_name=h1_task_name,
+        h1_card_id=h1_cid,
+        cid_mismatch=cid_mismatch,
     )
 
 
@@ -1246,6 +1264,57 @@ def parse_card_state_label(text: str) -> tuple[Optional[str], str]:
                 word = cand_word
             return sym, f"{disp_sym}{word}"
     return None, ""
+
+
+def parse_card_state_note(text: str) -> str:
+    """Return trailing parenthetical note '（...）' / '(...)' on top-level 状态 line inside 进度回写, or ''."""
+    doc = parse_markdown(text, strip_comments=True)
+    for b in extract_progress_blocks(doc):
+        if b.kind == "list_item":
+            if b.indent != 0:
+                continue
+            candidates = [(b.visible_lines(include_code=False)[0], b.visible_lines(include_code=True)[0])]
+        elif b.kind == "paragraph":
+            candidates = list(zip(b.visible_lines(include_code=False), b.visible_lines(include_code=True)))
+        else:
+            continue
+
+        for non_code_ln, with_code_ln in candidates:
+            if not non_code_ln or non_code_ln[0] in (" ", "\t", ">"):
+                continue
+            m = CARD_STATE_LINE_RE.match(non_code_ln)
+            if not m:
+                continue
+            src_val = m.group(1)
+            mark = STATE_RE.search(src_val)
+            m_full = CARD_STATE_LINE_RE.match(with_code_ln)
+            if m_full:
+                full_val = m_full.group(1)
+                full_mark = STATE_RE.search(full_val)
+                if full_mark:
+                    src_val = full_val
+                    mark = full_mark
+            if not mark:
+                return ""
+            sym = mark.group(0)
+            tail = src_val[mark.end() :].lstrip("\ufe0f \t*")
+            m_word = re.match(r"^([^\s（(【\[<；;，,。/|`*—–\-]+)", tail)
+            cand_word = m_word.group(1) if m_word else ""
+            if not cand_word or re.match(r"^\d", cand_word):
+                rem = tail.strip(" \t*")
+            else:
+                rem = tail[m_word.end() :].strip(" \t*")
+            if rem and (rem[0] not in ("（", "(") or rem[-1] not in ("）", ")")):
+                m_p = re.search(r"([（(].*[）)])$", rem)
+                rem = m_p.group(1).strip() if m_p else ""
+            if not rem or rem[0] not in ("（", "(") or rem[-1] not in ("）", ")"):
+                return ""
+            if PLACEHOLDER_RE.search(rem):
+                return ""
+            if rem in ("（不可派）", "(不可派)") and sym == "🟠":
+                return ""
+            return rem
+    return ""
 
 
 def extract_card_role_family(text: str, role: str) -> str:

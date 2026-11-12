@@ -83,6 +83,7 @@ class SyncResult:
     dup_issues: list[str]
     unparsed_files: list[str]
     card_count: int
+    notices: tuple[str, ...] = ()
 
 
 def natural_card_sort_key(card_id: str, filename: str = "") -> tuple[object, ...]:
@@ -118,6 +119,9 @@ class ExistingIndexCardRow:
     state_cell: str
     depends: str
     filename_key: str
+    line_no: int = 0
+    filename_raw: str = ""
+    col_mismatch: bool = False
 
 
 def _match_cards_header_columns(hdr_cells: Sequence[str]) -> Optional[tuple[int, int, int, Optional[int], Optional[int]]]:
@@ -154,6 +158,10 @@ def _group_table_blocks(blocks: Sequence[hl.Block], start_ln: int, end_ln: int) 
 
 def parse_existing_index_cards(
     raw_bytes: bytes,
+    *,
+    index_disp: str = "任务卡索引",
+    notices_out: Optional[list[str]] = None,
+    all_rows_out: Optional[list[ExistingIndexCardRow]] = None,
 ) -> tuple[dict[str, list[ExistingIndexCardRow]], dict[tuple[str, str], ExistingIndexCardRow]]:
     """Extract existing card checklist rows from index bytes (whether wrapped in cards markers or unmarked)."""
     if not raw_bytes:
@@ -161,20 +169,24 @@ def parse_existing_index_cards(
 
     chosen_hdr: Optional[tuple[str, ...]] = None
     data_blocks: list[hl.Block] = []
+    block_line_offset = 0
 
     span = find_marker_span_bytes(raw_bytes, "cards")
     if span.state == "ok":
         inner_txt = raw_bytes[span.inner_start : span.inner_end].decode("utf-8", errors="replace")
         inner_doc = hl.parse_markdown(inner_txt)
+        inner_offset = raw_bytes[: span.inner_start].count(b"\n")
         prefix_hdr = _extract_prefix_table_header(raw_bytes[: span.inner_start])
         if prefix_hdr is not None and hl.is_cards_table_header(prefix_hdr[1]):
             chosen_hdr = prefix_hdr[1]
             data_blocks = [b for b in inner_doc.blocks if b.kind == "table_row" and not b.is_separator]
+            block_line_offset = inner_offset
         else:
             for tbl in _group_table_blocks(inner_doc.blocks, 0, len(inner_doc.lines)):
                 if len(tbl) >= 2 and not tbl[0].is_separator and tbl[1].is_separator and hl.is_cards_table_header(tbl[0].cells):
                     chosen_hdr = tbl[0].cells
                     data_blocks = [b for b in tbl[2:] if not b.is_separator]
+                    block_line_offset = inner_offset
                     break
 
     if chosen_hdr is None:
@@ -218,6 +230,7 @@ def parse_existing_index_cards(
         if matching:
             chosen_hdr = matching[0][0].cells
             data_blocks = [b for b in matching[0][2:] if not b.is_separator]
+            block_line_offset = 0
 
     if chosen_hdr is None:
         return {}, {}
@@ -230,13 +243,83 @@ def parse_existing_index_cards(
     by_id_file: dict[tuple[str, str], ExistingIndexCardRow] = {}
     target_cols = len(chosen_hdr)
     for b in data_blocks:
+        file_line_no = block_line_offset + b.start_line + 1
         row_cells = _rejoin_unbalanced_paren_cells(b.cells, target_cols)
+        first_cell = row_cells[id_col].strip(" *`") if id_col < len(row_cells) else (row_cells[0].strip(" *`") if row_cells else "")
+        if not first_cell and all(not c.strip() for c in row_cells):
+            continue
+        if first_cell.startswith("【") or hl.PLACEHOLDER_RE.search(first_cell):
+            continue
+        if first_cell.upper() in ("TX", "TY", "TZ") and any("【例" in c or "示例" in c for c in row_cells):
+            continue
+
+        if len(row_cells) != target_cols:
+            # G2: Column count still differs from header after paren-rejoin -> warn & fall back task_name/depends
+            raw_cid = ""
+            if id_col < len(row_cells) and hl.is_valid_card_id(row_cells[id_col].strip(" *`")):
+                raw_cid = row_cells[id_col].strip(" *`")
+            else:
+                for c in row_cells:
+                    cand_c = c.strip(" *`")
+                    if hl.is_valid_card_id(cand_c):
+                        raw_cid = cand_c
+                        break
+            raw_file = ""
+            fname_key = ""
+            for c in reversed(row_cells):
+                cand_f = c.strip(" *`")
+                if cand_f.lower().endswith(".md"):
+                    raw_file = cand_f
+                    fname_key = Path(cand_f).name.lower()
+                    break
+            if not raw_cid and fname_key:
+                raw_cid = hl.extract_valid_card_id(Path(raw_file).stem)
+            if not raw_cid:
+                raw_cid = first_cell
+
+            raw_state = ""
+            if state_col < len(row_cells) and hl.STATE_RE.search(row_cells[state_col]):
+                raw_state = row_cells[state_col].strip()
+            else:
+                for c in row_cells:
+                    if hl.STATE_RE.search(c):
+                        raw_state = c.strip()
+                        break
+
+            actual_cols = len(row_cells)
+            diff = actual_cols - target_cols
+            diff_desc = f"多了 {diff} 格" if diff > 0 else f"少了 {-diff} 格"
+            cid_tag = f"（{raw_cid}）" if raw_cid else ""
+            if notices_out is not None:
+                notices_out.append(
+                    f"警告：{index_disp} 第 {file_line_no} 行{cid_tag}列数与表头不同"
+                    f"（实有 {actual_cols} 格，表头 {target_cols} 格，{diff_desc}）；"
+                    f"该行的任务名和依赖已改用卡头或文件名兜底"
+                )
+            if not raw_cid:
+                continue
+            row_obj = ExistingIndexCardRow(
+                card_id=raw_cid,
+                task_name="",
+                state_cell=raw_state,
+                depends="",
+                filename_key=fname_key,
+                line_no=file_line_no,
+                filename_raw=raw_file,
+                col_mismatch=True,
+            )
+            cu = raw_cid.upper()
+            by_id.setdefault(cu, []).append(row_obj)
+            if fname_key:
+                by_id_file.setdefault((cu, fname_key), row_obj)
+            if all_rows_out is not None:
+                all_rows_out.append(row_obj)
+            continue
+
         raw_cid = row_cells[id_col].strip(" *`") if id_col < len(row_cells) else ""
-        if not raw_cid or raw_cid.startswith("【") or hl.PLACEHOLDER_RE.search(raw_cid):
+        if not raw_cid:
             continue
         raw_name = row_cells[name_col].strip() if name_col < len(row_cells) else ""
-        if raw_cid.upper() in ("TX", "TY", "TZ") and ("【例" in raw_name or "示例" in raw_name):
-            continue
         if hl.PLACEHOLDER_RE.search(raw_name) or (raw_name.startswith("【") and raw_name.endswith("】")):
             raw_name = ""
         raw_state = row_cells[state_col].strip() if state_col < len(row_cells) else ""
@@ -252,11 +335,16 @@ def parse_existing_index_cards(
             state_cell=raw_state,
             depends=raw_dep,
             filename_key=fname_key,
+            line_no=file_line_no,
+            filename_raw=raw_file,
+            col_mismatch=False,
         )
         cu = raw_cid.upper()
         by_id.setdefault(cu, []).append(row_obj)
         if fname_key:
             by_id_file.setdefault((cu, fname_key), row_obj)
+        if all_rows_out is not None:
+            all_rows_out.append(row_obj)
     return by_id, by_id_file
 
 
@@ -350,13 +438,21 @@ def extract_index_state_note(state_cell: str, card_sym: Optional[str]) -> str:
     return rem
 
 
+def _norm_state_note_inner(note: str) -> str:
+    if not note or len(note) < 2:
+        return ""
+    inner = note[1:-1].replace(r"\|", "|")
+    inner = re.sub(r"\s*\|\s*", "|", inner)
+    return re.sub(r"\s+", " ", inner).strip()
+
+
 def resolve_card_fields(
     hdr: hl.CardHeaderInfo,
     fp: Path,
     idx_row: Optional[ExistingIndexCardRow],
 ) -> tuple[str, str]:
     """Resolve (task_name, depends) following 0.5.1 Convention 1 priority order:
-    1) New card header (# H1 + > 依赖：) -> 2) Existing index row -> 3) Filename after '_'."""
+    1) New card header (# H1 + > 依赖：) -> 2) Existing index row (if column count matches) -> 3) Card header / Filename after '_'."""
     if hdr.has_new_header:
         tname = hdr.task_name or fp.stem
         dep = hdr.depends or "—"
@@ -365,12 +461,13 @@ def resolve_card_fields(
     stem_after_us = fp.stem.split("_", 1)[1].strip() if "_" in fp.stem else ""
     fallback_name = stem_after_us if stem_after_us else (hdr.task_name or fp.stem)
 
-    if idx_row is not None:
+    if idx_row is not None and not idx_row.col_mismatch:
         tname = idx_row.task_name if idx_row.task_name else fallback_name
         dep = idx_row.depends if idx_row.depends else "—"
         return normalize_task_name(tname), dep
 
-    return normalize_task_name(fallback_name), "—"
+    fallback_dep = hdr.depends if hdr.has_dep_line else "—"
+    return normalize_task_name(fallback_name), fallback_dep
 
 
 def collect_cards(
@@ -378,6 +475,7 @@ def collect_cards(
     cfg: hl.HandoffConfig,
     *,
     index_raw_override: Optional[bytes] = None,
+    notices_out: Optional[list[str]] = None,
 ) -> tuple[list[CardBoardRow], list[str], list[str]]:
     cards_dir = root / cfg.cards_dir
     if not cards_dir.is_dir():
@@ -390,7 +488,13 @@ def collect_cards(
         idx_bytes = idx_fp.read_bytes()
     else:
         idx_bytes = b""
-    idx_by_id, idx_by_id_file = parse_existing_index_cards(idx_bytes)
+    all_idx_rows: list[ExistingIndexCardRow] = []
+    idx_by_id, idx_by_id_file = parse_existing_index_cards(
+        idx_bytes,
+        index_disp=cfg.index_file,
+        notices_out=notices_out,
+        all_rows_out=all_idx_rows,
+    )
 
     index_parent = idx_fp.parent
     raw_cards = sorted(fp for fp in cards_dir.glob("*.md") if "复核" not in fp.stem)
@@ -398,10 +502,43 @@ def collect_cards(
     for fp in raw_cards:
         text = hl.read_utf8(fp)
         hdr = hl.parse_card_header(text, fp.stem)
+        stem_valid_cid = hl.extract_valid_card_id(fp.stem)
         cid = (hdr.card_id or hl.extract_card_id(fp.stem)).strip()
+        if notices_out is not None:
+            if hdr.cid_mismatch and stem_valid_cid and hdr.h1_card_id:
+                notices_out.append(
+                    f"提示：{fp.name} 一级标题卡号「{hdr.h1_card_id}」与文件名卡号「{stem_valid_cid}」不一致，"
+                    f"已以文件名卡号「{stem_valid_cid}」为准"
+                )
+            elif hdr.cid_mismatch and not stem_valid_cid and hdr.h1_card_id:
+                notices_out.append(
+                    f"提示：{fp.name} 文件名未检出标准卡号（只认 T＋数字＋可选字母后缀），"
+                    f"与一级标题卡号「{hdr.h1_card_id}」不一致，暂取「{cid}」"
+                )
+            elif not hl.is_valid_card_id(cid):
+                notices_out.append(
+                    f"提示：{fp.name} 文件名与一级标题均未检出标准卡号（只认 T＋数字＋可选字母后缀），"
+                    f"暂以文件名「{cid}」为准"
+                )
         parsed_cards.append((fp, text, hdr, cid))
 
     idx_row_map = match_cards_to_index_rows([(cid, fp) for fp, _, _, cid in parsed_cards], idx_by_id, idx_by_id_file)
+
+    if notices_out is not None and parsed_cards:
+        claimed_ids = {id(r) for r in idx_row_map.values() if r is not None}
+        disk_fnames = {fp.name.lower(): fp.name for fp, _, _, _ in parsed_cards}
+        for ir in all_idx_rows:
+            if id(ir) not in claimed_ids:
+                name_hint = f"（{ir.task_name}）" if ir.task_name else ""
+                if ir.filename_key and ir.filename_key in disk_fnames:
+                    file_hint = f"（文件列指向 {ir.filename_raw or disk_fnames[ir.filename_key]}）"
+                elif ir.filename_raw and ir.filename_raw not in ("—", "-", "--"):
+                    file_hint = f"（文件列：{ir.filename_raw}）"
+                else:
+                    file_hint = ""
+                notices_out.append(
+                    f"提示：{cfg.index_file} 第 {ir.line_no} 行索引项「{ir.card_id}{name_hint}」无任何任务卡认领{file_hint}，未入生成表"
+                )
 
     rows: list[CardBoardRow] = []
     by_cid_files: dict[str, list[str]] = {}
@@ -422,6 +559,17 @@ def collect_cards(
             checked = sym in hl.CLOSED
             note = extract_index_state_note(idx_row.state_cell, sym) if idx_row is not None else ""
             state_label = base_state_label + note
+            if notices_out is not None:
+                card_note = hl.parse_card_state_note(text)
+                if card_note and _norm_state_note_inner(card_note) != _norm_state_note_inner(note):
+                    if note:
+                        notices_out.append(
+                            f"提示：{cid}（{fp.name}）卡面状态括号说明「{card_note}」与索引备注「{note}」不同，生成表保留索引备注"
+                        )
+                    else:
+                        notices_out.append(
+                            f"提示：{cid}（{fp.name}）卡面状态括号说明「{card_note}」与索引备注（无）不同，生成表不带卡面括号说明"
+                        )
 
         by_cid_disp.setdefault(cu, cid)
         by_cid_files.setdefault(cu, []).append(fp.name)
@@ -683,7 +831,8 @@ def sync_project(root: Path, *, check_only: bool = False, cfg: Optional[hl.Hando
         for w in cfg.warnings:
             print(f"提示：{w}", file=sys.stderr)
 
-    rows, dup_issues, unparsed_files = collect_cards(root, cfg)
+    notices: list[str] = []
+    rows, dup_issues, unparsed_files = collect_cards(root, cfg, notices_out=notices)
     updated: list[str] = []
     unchanged: list[str] = []
     drifted: list[str] = []
@@ -751,6 +900,7 @@ def sync_project(root: Path, *, check_only: bool = False, cfg: Optional[hl.Hando
         dup_issues=dup_issues,
         unparsed_files=unparsed_files,
         card_count=len(rows),
+        notices=tuple(notices),
     )
 
 
@@ -768,6 +918,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"警告：{w}", file=sys.stderr)
     if res.unparsed_files:
         print("警告：状态行无法解析：" + "、".join(res.unparsed_files), file=sys.stderr)
+    for msg in res.notices:
+        print(msg, file=sys.stderr)
     for err in res.errors:
         print(f"错误：{err}", file=sys.stderr)
     for h in res.missing_marker_hints:
