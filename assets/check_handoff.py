@@ -40,6 +40,8 @@
        A014 AGENTS.md 剩余【待填】按节统计，§5“不可混用的维度”未填单独点名
        A015 任务卡目录存在且非空（缺失或 0 张卡时提示卡类检查未做）
        A016 协作规矩文件存在、版本不低于脚本版本且正文哈希与首行一致（被改过提示）
+       A017 分析建模与头条数字类已收口卡复核方家族非空，且头条数字类与执行方不同家族
+       A018 关键数字表（关键数字.md）与对外名称对照表（对外名称对照.md）存在（只提示存在性）
 
 根索引检查（--scope index）：
   I001 根 AGENTS.md 存在；I002 声明为索引；I003 表里列出的线级 AGENTS.md 都存在
@@ -57,7 +59,7 @@ from typing import Optional
 
 sys.dont_write_bytecode = True
 
-__version__ = "0.4.2"
+__version__ = "0.5.0"
 
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -71,9 +73,11 @@ if _HERE not in sys.path:
 try:
     import handoff_lib as hl
     from handoff_lib import handoff_blocks, pointer_ok, section  # noqa: F401
-except ImportError:
-    print("错误：未找到 handoff_lib.py，请把 handoff_lib.py 一起复制到同一目录。", file=sys.stderr)
-    raise SystemExit(2)
+except ImportError as _exc:
+    if isinstance(_exc, ModuleNotFoundError) and getattr(_exc, "name", None) == "handoff_lib":
+        print("错误：未找到 handoff_lib.py，请把 handoff_lib.py 一起复制到同一目录。", file=sys.stderr)
+        raise SystemExit(2)
+    raise
 
 DISPLAY_CONST_RE = re.compile(
     r"(?:^|_)(?:COLORS?|PALETTES?|CMAPS?|COLORMAPS?|STYLES?|FONTS?|MARKERS?|HATCH(?:ES)?|LINESTYLES?|ALPHAS?|SIZES?|WIDTHS?)$"
@@ -1055,6 +1059,21 @@ def advisories(
         ("；".join(a017_issues[:6]) + ("…" if len(a017_issues) > 6 else ""))
         if a017_issues
         else (f"{typed_closed_cnt} 张受检已收口卡合规" if typed_closed_cnt else "暂无标分析建模/头条数字的已收口卡"),
+        True,
+    )
+
+    missing_tables = [
+        f"{cfg.docs_dir}/{fn}"
+        for fn in ("关键数字.md", "对外名称对照.md")
+        if not (root / cfg.docs_dir / fn).is_file()
+    ]
+    add(
+        "A018",
+        "关键数字表与对外名称对照表存在",
+        not missing_tables,
+        ("缺少 " + "、".join(missing_tables) + "（可从技能 assets/ 复制模板）")
+        if missing_tables
+        else "关键数字.md、对外名称对照.md 均存在",
         True,
     )
 

@@ -13,8 +13,8 @@
 
 - **One authoritative entry (`AGENTS.md`)**: North Star, current snapshot (§3), grep-friendly decision registry (§3.5), task board (§4), behavioral & unit invariants (§5), scratch/cloud-sync path rules (§5.5), and environment paths (§7). Supports both single-line (`Scope: line`) and multi-line root index (`Scope: index`) layouts.
 - **Thin pointers**: `CLAUDE.md` (with `@AGENTS.md` import), `GEMINI.md`, `.cursor/rules/multi-agent.mdc`, and `.github/copilot-instructions.md` pointing to the same `AGENTS.md`.
-- **Self-contained task cards & incremental handoffs**: One card per task (execution + cross-family independent review prompts) under `文档/任务卡/`, plus bounded 4-section handoffs (`≤800` chars) in `STATUS.md`.
-- **Zero-dependency Python utilities**: `handoff_lib.py` (shared block-based Markdown parser & path config), `check_handoff.py` (blocking gates `H001–H009` + advisories `A001–A015`, with `--role`), and `archive_status.py` (line-ending-preserving archiver for `STATUS.md` and `AGENTS.md` §3 that retains active cards' handoffs).
+- **Self-contained task cards, standalone rules & incremental handoffs**: Shared rules live in `文档/协作规矩.md` (replaceable on upgrade), one card per task (`assets/任务卡_模板.md`) under `文档/任务卡/`, and bounded 4-section handoffs (`≤800` chars) in `STATUS.md`.
+- **Zero-dependency Python utilities**: `handoff_lib.py`, `check_handoff.py` (`H001–H009` + `A001–A018`, `--role`), `archive_status.py`, `sync_board.py`, `upgrade.py`, and `fingerprint.py`.
 
 ## Installation
 
@@ -39,7 +39,7 @@ Start a new session after cloning. If you only want the templates without instal
 All templates and operational rules are maintained in Chinese as the single authoritative source:
 
 - **Overview & Compatibility**: [`README.md`](README.md)
-- **Skill Workflow (Mode A / Mode B) & 10 Hard Rules**: [`SKILL.md`](SKILL.md)
+- **Skill Workflow (Mode A / Mode B / Mode C) & 10 Hard Rules**: [`SKILL.md`](SKILL.md)
 - **Tool Installation Paths**: [`references/install.md`](references/install.md)
 - **Filled `AGENTS.md` Example**: [`references/example_filled_AGENTS.md`](references/example_filled_AGENTS.md)
 - **Multi-Line Projects & Advanced Patterns**: [`references/multi_line.md`](references/multi_line.md) · [`references/advanced.md`](references/advanced.md)

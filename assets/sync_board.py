@@ -29,7 +29,7 @@ from typing import Optional
 
 sys.dont_write_bytecode = True
 
-__version__ = "0.4.2"
+__version__ = "0.5.0"
 
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -43,7 +43,7 @@ if _HERE not in sys.path:
 try:
     import handoff_lib as hl
 except ImportError as _exc:
-    if getattr(_exc, "name", None) in (None, "handoff_lib"):
+    if isinstance(_exc, ModuleNotFoundError) and getattr(_exc, "name", None) == "handoff_lib":
         print("错误：未找到 handoff_lib.py，请把 handoff_lib.py 一起复制到同一目录。", file=sys.stderr)
         raise SystemExit(2)
     raise

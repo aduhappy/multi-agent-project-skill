@@ -29,12 +29,12 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 3. **建入口**：**单线项目**拷 `assets/AGENTS.md`；**多线项目**拷 `assets/ROOT_AGENTS.md` 作根索引，并为每条线拷 `assets/AGENTS.md`（冷启动与四条规矩见 [`references/multi_line.md`](references/multi_line.md)）。未知项留 `【待填】`，已知项直接填入。
 4. **复制薄指针**：按勾选工具复制 `assets/CLAUDE.md`、`assets/GEMINI.md`、`assets/multi-agent.mdc` → `.cursor/rules/multi-agent.mdc` 或 `assets/copilot-instructions.md` → `.github/copilot-instructions.md`，统一指向当前 scope 根 `AGENTS.md`（子目录配置仍指向上级 scope 根）。未勾选不生成。
 5. **建规矩、任务卡与索引**：拷 `assets/协作规矩.md` → `文档/协作规矩.md`（唯一出处，项目不改；例外写 `AGENTS.md` §5“本项目例外”）、`assets/任务卡_README.md` → `文档/任务卡_README.md`，照 `assets/任务卡_模板.md` 建 `文档/任务卡/T1_<主题>.md`（一个任务一张卡，执行与独立复核同卡双提示词）。多树/迁移另拷 `assets/迁移协议.md`、`assets/经验教训.md`。
-6. **可选专题文件**：按需拷 `assets/环境坑.md` → `文档/环境坑.md`，或建 `文档/决策记录/`、`文档/词汇表.md`（见 [`references/advanced.md`](references/advanced.md)）。
+6. **权威层与可选专题文件**：拷 `assets/关键数字.md` → `文档/关键数字.md`（与 §3.5 决策表同为权威层）、`assets/对外名称对照.md` → `文档/对外名称对照.md`；按需拷 `assets/环境坑.md` → `文档/环境坑.md`，或建 `文档/决策记录/`、`文档/词汇表.md`（见 [`references/advanced.md`](references/advanced.md)）。
 7. **数据集溯源**：每类数据目录放 `来源.txt`（拷 `assets/来源.txt`）；无明确数据源可跳过。
-8. **脚本归位**：建 `scripts/` + `scripts/README.md`（`assets/scripts_README.md`），一起复制 `assets/handoff_lib.py`、`assets/check_handoff.py`、`assets/archive_status.py`、`assets/sync_board.py`、`assets/upgrade.py` 到 `scripts/`（自定义目录可在项目根放 `handoff_config.json`）：
+8. **脚本归位**：建 `scripts/` + `scripts/README.md`（`assets/scripts_README.md`），一起复制 `assets/handoff_lib.py`、`assets/check_handoff.py`、`assets/archive_status.py`、`assets/sync_board.py`、`assets/upgrade.py`、`assets/fingerprint.py` 到 `scripts/`（自定义目录可在项目根放 `handoff_config.json`）：
    - 看板同步：建卡或改状态后跑 `python scripts/sync_board.py`，自动同步 `AGENTS.md` §4（`board` 标记）与索引表（`cards` 标记），标记外不动。
-   - 收工自检：主控跑 `python scripts/check_handoff.py --scope line|index`，执行/复核方跑 `--role executor|reviewer --card T<卡号>`（涵盖 H001–H009 与 A001–A017）。
-   - 一键归档：超限时跑 `python scripts/archive_status.py` 保留最近 N 段交接、在用卡交接段与 §3 最近 5 条，其余迁入 `文档/*_归档_至<日期>.md`。
+   - 收工自检：主控跑 `python scripts/check_handoff.py --scope line|index`，执行/复核方跑 `--role executor|reviewer --card T<卡号>`（涵盖 H001–H009 与 A001–A018）。
+   - 归档与指纹：超限时跑 `python scripts/archive_status.py` 保留最近 N 段交接、在用卡交接段与 §3 最近 5 条；非 git 或只读目录用 `python scripts/fingerprint.py snapshot/compare` 记哈希比对。
 9. **建 `STATUS.md`**：拷 `assets/STATUS.md` 并填入首段交接（“谁做的”＋四节 ≤800 字，去掉 `YYYY-MM-DD` 占位符）。交接标题仅支持 `##` 或 `###`（`####` 及更深标题不算交接段），须含 `Handoff`/`交接` 或以日期/`T<卡号>+日期` 开头（`## 交回说明`、`## 归档说明` 不算交接段）。
 10. **写入约束**：把环境路径、行为红线、工作盘分流分别填入线级 §7、§5、§5.5。
 11. **验证交回**：跑 `python scripts/sync_board.py`、`python scripts/check_handoff.py` 与 `python scripts/archive_status.py --dry-run`，告知用户已生成文件、默认值和待确认项。
@@ -61,6 +61,7 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 │   ├── 协作规矩.md                    ← 卡面规矩 + 通用铁律 + 各角色须知唯一出处（技能整份提供，项目不改）
 │   ├── 任务卡/T1_<主题>.md            ← 自包含任务卡（执行 + 独立复核同卡）
 │   ├── 任务卡_README.md               ← 依赖链 + 任务卡清单（含 cards 标记）
+│   ├── 关键数字.md / 对外名称对照.md  ← 关键数字权威表 / 内部名↔对外名对照表
 │   ├── 环境坑.md                      ← 软件/环境/同步盘已知坑单一来源（可选）
 │   ├── 迁移协议.md / 经验教训.md      ← 多树迁移协议 / 规则实测案例（可选）
 │   └── 决策记录/ · 词汇表.md          ← 复杂决策详卡 · 术语表（可选）
@@ -68,10 +69,11 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 └── scripts/
     ├── README.md                      ← 脚本索引
     ├── handoff_lib.py                 ← 共享 Markdown 块级解析与路径配置库
-    ├── check_handoff.py               ← 收工交接自检（H001–H009 + A001–A017，支持 --role）
+    ├── check_handoff.py               ← 收工交接自检（H001–H009 + A001–A018，支持 --role）
     ├── archive_status.py              ← STATUS 与 AGENTS §3 一键归档（保留在用卡交接段）
     ├── sync_board.py                  ← 从任务卡自动同步 AGENTS §4 与索引卡清单表
-    └── upgrade.py                     ← 已有骨架一键升级（默认只预览，绝不写入口/卡/STATUS）
+    ├── upgrade.py                     ← 已有骨架一键升级（默认只预览，绝不写入口/卡/STATUS）
+    └── fingerprint.py                 ← 目录/文件 SHA-256 快照与新增/删除/改动比对
 ```
 
 ## AGENTS.md 板块与边界（照 `assets/AGENTS.md` 填）

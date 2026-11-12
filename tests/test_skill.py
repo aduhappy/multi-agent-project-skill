@@ -136,6 +136,8 @@ def test_asset_sizes() -> None:
         ("assets/任务卡_README.md", 15_000),
         ("assets/任务卡_模板.md", 6_000),
         ("assets/AGENTS.md", 6_000),
+        ("assets/关键数字.md", 15_000),
+        ("assets/对外名称对照.md", 15_000),
     ):
         fp = REPO / rel
         size = len(fp.read_bytes())
@@ -936,6 +938,8 @@ def test_041_a10_summary_counts() -> None:
         line = build(Path(temp))
         # Make line 100% green (0 fails, 0 advisories)
         write(line / "文档" / "协作规矩.md", (REPO / "assets" / "协作规矩.md").read_text(encoding="utf-8"))
+        write(line / "文档" / "关键数字.md", (REPO / "assets" / "关键数字.md").read_text(encoding="utf-8"))
+        write(line / "文档" / "对外名称对照.md", (REPO / "assets" / "对外名称对照.md").read_text(encoding="utf-8"))
         write(
             line / "文档" / "任务卡" / "T1_初稿.md",
             "# T1\n\n## 进度回写\n- 状态：✅已收口\n",
@@ -1196,21 +1200,24 @@ def test_041_d2_no_assets_pycache() -> None:
 
 
 def test_041_d3_versions_and_changelog() -> None:
-    """D3: All three scripts expose __version__ == '0.4.2' and --version; CHANGELOG.md documents 0.4.2."""
-    check(getattr(hl_mod, "__version__", None) == "0.4.2", "handoff_lib.__version__ must be '0.4.2'")
-    check(getattr(checker_mod, "__version__", None) == "0.4.2", "check_handoff.__version__ must be '0.4.2'")
-    check(getattr(archiver_mod, "__version__", None) == "0.4.2", "archive_status.__version__ must be '0.4.2'")
+    """D3: All six scripts expose __version__ == '0.5.0' and --version; CHANGELOG.md documents 0.5.0 and upgrade guide."""
+    check(getattr(hl_mod, "__version__", None) == "0.5.0", "handoff_lib.__version__ must be '0.5.0'")
+    check(getattr(checker_mod, "__version__", None) == "0.5.0", "check_handoff.__version__ must be '0.5.0'")
+    check(getattr(archiver_mod, "__version__", None) == "0.5.0", "archive_status.__version__ must be '0.5.0'")
 
-    for script in (CHECKER, ARCHIVER):
+    for sname in ("check_handoff.py", "archive_status.py", "sync_board.py", "upgrade.py", "fingerprint.py"):
+        script = ASSETS_DIR / sname
         res = subprocess.run(
             [sys.executable, "-B", str(script), "--version"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
         )
         combined = (res.stdout + res.stderr).strip()
-        check(res.returncode == 0 and "0.4.2" in combined, f"{script.name} --version must output 0.4.2, got: {combined}")
+        check(res.returncode == 0 and "0.5.0" in combined, f"{script.name} --version must output 0.5.0, got: {combined}")
 
     changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
-    check(bool(re.search(r"(?m)^##\s+0\.4\.2\b", changelog)), "CHANGELOG.md must have a ## 0.4.2 section")
+    check(bool(re.search(r"(?m)^##\s+0\.5\.0\b", changelog)), "CHANGELOG.md must have a ## 0.5.0 section")
+    check("从 0.4.x 升级" in changelog, "CHANGELOG.md must include '从 0.4.x 升级' section")
+    check(bool(re.search(r"(?m)^##\s+0\.4\.2\b", changelog)), "CHANGELOG.md must preserve ## 0.4.2 section")
     check(bool(re.search(r"(?m)^##\s+0\.4\.1\b", changelog)), "CHANGELOG.md must preserve ## 0.4.1 section")
 
 
@@ -1983,6 +1990,8 @@ def test_042_conv4_config() -> None:
         )
         write(line / "文档" / "T2_复核_SWE2_2026-09-15.md", "# T2 复核\n\n## 会出错\n无\n\n## 建议\n无\n\nPASS\n")
         write(line / "文档" / "协作规矩.md", (REPO / "assets" / "协作规矩.md").read_text(encoding="utf-8"))
+        write(line / "文档" / "关键数字.md", (REPO / "assets" / "关键数字.md").read_text(encoding="utf-8"))
+        write(line / "文档" / "对外名称对照.md", (REPO / "assets" / "对外名称对照.md").read_text(encoding="utf-8"))
 
         rc_before, out_before = run(line)
         check(rc_before == 0, f"fixture before rename must pass:\n{out_before}")
@@ -2327,16 +2336,17 @@ def test_042_v9_a002_numeric_and_tuples() -> None:
 
 
 def test_042_conv1_three_files_and_missing_lib() -> None:
-    """0.4.2 Conv1: SKILL.md, scripts_README.md, README.md, README.en.md list 3 scripts; missing handoff_lib.py exits 2."""
+    """0.4.2 Conv1 (updated in 0.5.0): docs list all 6 scripts; missing handoff_lib.py exits 2."""
     for rel in ("SKILL.md", "assets/scripts_README.md", "README.md", "README.en.md"):
         txt = (REPO / rel).read_text(encoding="utf-8")
-        for fn in ("handoff_lib.py", "check_handoff.py", "archive_status.py"):
+        for fn in ("handoff_lib.py", "check_handoff.py", "archive_status.py", "sync_board.py", "upgrade.py", "fingerprint.py"):
             check(fn in txt, f"{rel} must list {fn}")
 
     with tempfile.TemporaryDirectory() as temp:
         tdir = Path(temp) / "scripts"
         tdir.mkdir(parents=True)
-        for src in (CHECKER, ARCHIVER):
+        for sname in ("check_handoff.py", "archive_status.py", "sync_board.py", "upgrade.py"):
+            src = ASSETS_DIR / sname
             dst = tdir / src.name
             dst.write_bytes(src.read_bytes())
             res = subprocess.run(
@@ -2691,7 +2701,7 @@ def test_050_conv2_card_template_and_a017() -> None:
 
     raw_bytes = tpl_path.read_bytes()
     check(len(raw_bytes) <= 6_000, f"assets/任务卡_模板.md must be <= 6000B, got {len(raw_bytes)}B")
-    tpl_text = raw_bytes.decode("utf-8")
+    tpl_text = raw_bytes.decode("utf-8").replace("\r\n", "\n")
     top3 = tpl_text.splitlines()[:3]
     check(
         len(top3) == 3
@@ -3103,6 +3113,151 @@ def test_050_conv5_upgrade() -> None:
         check(snapshot_recovered == snapshot_after1, "recovery --apply after partial state must converge to identical hashes and preserve initial backup")
 
 
+def test_050_conv6_extras_and_t13d() -> None:
+    """0.5.0 Convention 6: 关键数字/对外名称对照 templates + A018, fingerprint.py, .gitattributes LF, T13d suggestions 1/3/5/7."""
+    import json
+    # 1. Templates 关键数字.md & 对外名称对照.md + 权威层 wording
+    key_nums_txt = (ASSETS_DIR / "关键数字.md").read_text(encoding="utf-8")
+    for col in ("数字", "值", "单位", "口径", "来源脚本或文件", "日期"):
+        check(col in key_nums_txt, f"assets/关键数字.md missing column '{col}'")
+    ext_names_txt = (ASSETS_DIR / "对外名称对照.md").read_text(encoding="utf-8")
+    for col in ("内部名", "对外名"):
+        check(col in ext_names_txt, f"assets/对外名称对照.md missing column '{col}'")
+
+    rules_txt = (ASSETS_DIR / "协作规矩.md").read_text(encoding="utf-8")
+    check("文档/关键数字.md" in rules_txt and "决策登记表" in rules_txt, "协作规矩.md must define 权威层 as 文档/关键数字.md and 决策登记表")
+
+    # 2. .gitattributes enforces LF on *.py and *.md
+    gitattr = (REPO / ".gitattributes").read_text(encoding="utf-8")
+    check("*.py text eol=lf" in gitattr and "*.md text eol=lf" in gitattr, f".gitattributes must enforce eol=lf:\n{gitattr}")
+    for p in list(REPO.rglob("*.py")) + list(REPO.rglob("*.md")):
+        if ".git" in p.parts:
+            continue
+        check(b"\r\n" not in p.read_bytes(), f"{p.relative_to(REPO)} must use LF line endings (no CRLF)")
+
+    # 3. fingerprint.py snapshot & compare (added, deleted, modified, unchanged, --check)
+    fp_script = ASSETS_DIR / "fingerprint.py"
+    check(fp_script.is_file(), "assets/fingerprint.py must exist")
+    with tempfile.TemporaryDirectory() as temp:
+        troot = Path(temp)
+        d1 = troot / "data"
+        write(d1 / "a.csv", "id,val\n1,10\n")
+        write(d1 / "b.csv", "id,val\n2,20\n")
+        snap1 = troot / "snap1.json"
+        snap2 = troot / "snap2.json"
+
+        r_s1 = subprocess.run(
+            [sys.executable, "-B", str(fp_script), "snapshot", str(d1), "-o", str(snap1)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(r_s1.returncode == 0 and snap1.is_file(), f"fingerprint snapshot failed:\n{r_s1.stdout}\n{r_s1.stderr}")
+
+        # Unchanged compare (--check exits 0)
+        r_eq = subprocess.run(
+            [sys.executable, "-B", str(fp_script), "compare", str(snap1), str(d1), "--check"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(r_eq.returncode == 0 and "新增 0，删除 0，改动 0" in r_eq.stdout, f"unchanged compare must exit 0:\n{r_eq.stdout}")
+
+        # Mutate: modify a.csv, delete b.csv, add c.csv
+        write(d1 / "a.csv", "id,val\n1,99\n")
+        (d1 / "b.csv").unlink()
+        write(d1 / "c.csv", "id,val\n3,30\n")
+        subprocess.run(
+            [sys.executable, "-B", str(fp_script), "snapshot", str(d1), "-o", str(snap2)],
+            check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        r_cmp = subprocess.run(
+            [sys.executable, "-B", str(fp_script), "compare", str(snap1), str(snap2), "--check"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(
+            r_cmp.returncode == 1
+            and "新增 1，删除 1，改动 1" in r_cmp.stdout
+            and "[新增] c.csv" in r_cmp.stdout
+            and "[删除] b.csv" in r_cmp.stdout
+            and "[改动] a.csv" in r_cmp.stdout,
+            f"fingerprint compare must report added/deleted/modified and exit 1 with --check:\n{r_cmp.stdout}",
+        )
+
+    # 4. A018 advisory + T13d suggestions 1, 3, 5, 7
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(line / "文档" / "协作规矩.md", rules_txt)
+        rc0, out0 = run(line)
+        check(
+            rc0 == 0 and "[A018] ⚠️" in out0 and "关键数字.md" in out0 and "对外名称对照.md" in out0,
+            f"missing 关键数字.md / 对外名称对照.md must warn A018 without failing:\n{out0}",
+        )
+        write(line / "文档" / "关键数字.md", key_nums_txt)
+        write(line / "文档" / "对外名称对照.md", ext_names_txt)
+        rc1, out1 = run(line)
+        check(rc1 == 0 and "[A018] ✅" in out1, f"present 关键数字.md & 对外名称对照.md must pass A018:\n{out1}")
+
+        # T13d Suggestion 1: real handoff heading containing '归档' in topic is recognized, while archive notice is excluded
+        check(hl_mod.is_handoff_heading("Handoff（2026-09-15，T5 归档整理）") is True, "real handoff mentioning 归档 must be recognized")
+        check(hl_mod.is_handoff_heading("2026-09-15 交接：状态归档与校验") is True, "date + 交接 mentioning 归档 must be recognized")
+        check(hl_mod.is_handoff_heading("归档说明（旧段已移至 2026-09-15 归档文件）") is False, "归档说明 heading must remain excluded")
+        check(hl_mod.is_handoff_heading("2026-09-15 归档说明") is False, "date + 归档说明 notice must remain excluded")
+        write(
+            line / "STATUS.md",
+            "# STATUS\n\n## Handoff（2026-09-10，初稿）\n- 旧段。\n\n"
+            "## Handoff（2026-09-15，T5 归档整理）\n"
+            "- **谁做的**：执行方\n- **改了什么**：整理归档。\n- **怎么验证的**：全过。\n- **没做什么**：无。\n- **不确定处**：无。\n",
+        )
+        rc_s1, out_s1 = run(line)
+        check(rc_s1 == 0 and "[H006] ✅" in out_s1, f"T13d-1: Handoff with 归档 in topic must count for H006:\n{out_s1}")
+
+        # T13d Suggestion 3: undated handoff heading with newer date in body beats older dated heading
+        write(
+            line / "STATUS.md",
+            "# STATUS\n\n## Handoff（2026-09-10，旧段）\n- 旧段。\n\n"
+            "## Handoff（最新无标题日期段）\n"
+            "- **谁做的**：主控（2026-09-15）\n- **改了什么**：更新。\n- **怎么验证的**：通过。\n- **没做什么**：无。\n- **不确定处**：无。\n",
+        )
+        rc_s3, out_s3 = run(line)
+        check(rc_s3 == 0 and "[H006] ✅" in out_s3, f"T13d-3: per-segment body date 2026-09-15 must beat older heading date 2026-09-10:\n{out_s3}")
+
+        # T13d Suggestion 5: handoff_config.json rejects absolute paths and '..' traversal with warnings
+        for bad_cfg in (
+            {"docs_dir": "F:/abs_outside"},
+            {"docs_dir": "/etc/outside"},
+            {"cards_dir": "../escape/cards"},
+            {"index_file": "docs/../../escape.md"},
+            {"review_dirs": ["docs", "../escape_rev"]},
+        ):
+            (line / "handoff_config.json").write_text(json.dumps(bad_cfg, ensure_ascii=False), encoding="utf-8")
+            loaded = hl_mod.load_handoff_config(line)
+            check(
+                loaded.docs_dir == "文档"
+                and loaded.cards_dir == "文档/任务卡"
+                and loaded.index_file == "文档/任务卡_README.md"
+                and loaded.review_dirs == ("文档", "reports")
+                and len(loaded.warnings) >= 1,
+                f"T13d-5: unsafe config {bad_cfg} must warn and fall back to defaults, got {loaded}",
+            )
+            rc_cfg, out_cfg = run(line)
+            check(rc_cfg == 0 and "提示：handoff_config.json" in out_cfg, f"T13d-5: checker must print config warning:\n{out_cfg}")
+
+    # T13d Suggestion 7: internal ImportError inside handoff_lib.py re-raises instead of falsely claiming missing handoff_lib.py
+    with tempfile.TemporaryDirectory() as temp:
+        sdir = Path(temp) / "scripts"
+        sdir.mkdir(parents=True)
+        (sdir / "check_handoff.py").write_bytes(CHECKER.read_bytes())
+        (sdir / "handoff_lib.py").write_text("import _nonexistent_internal_dep_xyz_050\n", encoding="utf-8")
+        r_imp = subprocess.run(
+            [sys.executable, "-B", str(sdir / "check_handoff.py"), str(Path(temp))],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        combined_imp = r_imp.stdout + r_imp.stderr
+        check(
+            r_imp.returncode != 0
+            and "_nonexistent_internal_dep_xyz_050" in combined_imp
+            and "请把 handoff_lib.py 一起复制到同一目录" not in combined_imp,
+            f"T13d-7: internal ImportError in handoff_lib must not print copy hint:\n{combined_imp}",
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -3296,6 +3451,7 @@ def main(argv: list[str] | None = None) -> int:
     test_050_conv3_sync_board()
     test_050_conv4_agents_template()
     test_050_conv5_upgrade()
+    test_050_conv6_extras_and_t13d()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")

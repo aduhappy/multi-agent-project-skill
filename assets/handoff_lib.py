@@ -25,7 +25,7 @@ from typing import Optional
 
 sys.dont_write_bytecode = True
 
-__version__ = "0.4.2"
+__version__ = "0.5.0"
 
 DATE_RE = re.compile(r"(?<!\d)(20\d{2}-\d{2}-\d{2})(?!\d)")
 FLEX_DATE_TOKEN_RE = re.compile(
@@ -37,6 +37,7 @@ HEADING_DATE_START_RE = re.compile(
 DATE_PLACEHOLDER_RE = re.compile(r"YYYY[-/.]MM[-/.]DD|YYYY\s*年\s*MM\s*月\s*DD\s*日", re.I)
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 HEAD_RE = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*)|[ \t]*)$")
+# 有意的不对称兼容（T13d 建议 4）：仅任务卡“##进度回写”兼容无空格存量旧卡；STATUS 的“##Handoff”无空格按 CommonMark 不识别为标题。
 NO_SPACE_PROGRESS_HEAD_RE = re.compile(r"^ {0,3}(#{2,3})(进度回写.*)$")
 LIST_ITEM_RE = re.compile(r"^([ \t]*)([-*+]|\d+[.)])(?:[ \t]+(.*)|[ \t]*)$")
 CHECKBOX_PREFIX_RE = re.compile(r"^\[([ xX]?)\](.*)$")
@@ -165,11 +166,27 @@ class HandoffConfig:
     warnings: tuple[str, ...] = ()
 
 
-def _clean_rel_path(val: object) -> Optional[str]:
+def _validate_rel_config_path(val: object) -> tuple[Optional[str], str]:
+    """Validate relative path inside project root; reject non-strings, empty, absolute paths, and '..' segments."""
     if not isinstance(val, str):
-        return None
-    s = val.strip().replace("\\", "/").strip("/")
-    return s if s else None
+        return None, "值须为非空相对路径字符串"
+    raw = val.strip()
+    if not raw:
+        return None, "值不能为空"
+    if raw.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", raw) or Path(raw).is_absolute():
+        return None, f"禁止使用绝对路径 {raw!r}"
+    norm = raw.replace("\\", "/").strip("/")
+    if not norm:
+        return None, f"路径 {raw!r} 无效"
+    parts = [p for p in norm.split("/") if p and p != "."]
+    if not parts or ".." in parts:
+        return None, f"禁止使用含 '..' 的越界路径 {raw!r}"
+    return "/".join(parts), ""
+
+
+def _clean_rel_path(val: object) -> Optional[str]:
+    cleaned, _ = _validate_rel_config_path(val)
+    return cleaned
 
 
 def load_handoff_config(root: Path) -> HandoffConfig:
@@ -196,35 +213,48 @@ def load_handoff_config(root: Path) -> HandoffConfig:
 
     docs_dir = DEFAULT_DOCS_DIR
     if "docs_dir" in data:
-        cleaned = _clean_rel_path(data["docs_dir"])
+        cleaned, reason = _validate_rel_config_path(data["docs_dir"])
         if cleaned is not None:
             docs_dir = cleaned
         else:
-            warns.append(f"{CONFIG_FILENAME} 键 docs_dir 值无效，已使用默认值 {DEFAULT_DOCS_DIR!r}。")
+            warns.append(f"{CONFIG_FILENAME} 键 docs_dir 无效（{reason}），已使用默认值 {DEFAULT_DOCS_DIR!r}。")
 
     cards_dir = DEFAULT_CARDS_DIR
     if "cards_dir" in data:
-        cleaned = _clean_rel_path(data["cards_dir"])
+        cleaned, reason = _validate_rel_config_path(data["cards_dir"])
         if cleaned is not None:
             cards_dir = cleaned
         else:
-            warns.append(f"{CONFIG_FILENAME} 键 cards_dir 值无效，已使用默认值 {DEFAULT_CARDS_DIR!r}。")
+            warns.append(f"{CONFIG_FILENAME} 键 cards_dir 无效（{reason}），已使用默认值 {DEFAULT_CARDS_DIR!r}。")
 
     index_file = DEFAULT_INDEX_FILE
     if "index_file" in data:
-        cleaned = _clean_rel_path(data["index_file"])
+        cleaned, reason = _validate_rel_config_path(data["index_file"])
         if cleaned is not None:
             index_file = cleaned
         else:
-            warns.append(f"{CONFIG_FILENAME} 键 index_file 值无效，已使用默认值 {DEFAULT_INDEX_FILE!r}。")
+            warns.append(f"{CONFIG_FILENAME} 键 index_file 无效（{reason}），已使用默认值 {DEFAULT_INDEX_FILE!r}。")
 
     review_dirs = DEFAULT_REVIEW_DIRS
     if "review_dirs" in data:
         rv = data["review_dirs"]
-        if isinstance(rv, list) and all(isinstance(x, str) and x.strip() for x in rv):
-            review_dirs = tuple(x.strip().replace("\\", "/").strip("/") for x in rv)
-        else:
+        if not isinstance(rv, list) or not rv:
             warns.append(f"{CONFIG_FILENAME} 键 review_dirs 须为非空字符串列表，已使用默认值 {list(DEFAULT_REVIEW_DIRS)!r}。")
+        else:
+            cleaned_rv: list[str] = []
+            bad_reasons: list[str] = []
+            for item in rv:
+                c_item, r_item = _validate_rel_config_path(item)
+                if c_item is None:
+                    bad_reasons.append(r_item)
+                else:
+                    cleaned_rv.append(c_item)
+            if bad_reasons:
+                warns.append(
+                    f"{CONFIG_FILENAME} 键 review_dirs 含非法路径（{'；'.join(bad_reasons)}），已使用默认值 {list(DEFAULT_REVIEW_DIRS)!r}。"
+                )
+            else:
+                review_dirs = tuple(cleaned_rv)
 
     return HandoffConfig(
         docs_dir=docs_dir,
@@ -917,7 +947,9 @@ def extract_progress_blocks(doc: ParsedDoc) -> list[Block]:
 
 
 def parse_card_state(text: str) -> Optional[str]:
-    """Extract card state emoji from top-level 状态 line inside 进度回写 section."""
+    """Extract card state emoji from top-level 状态 line inside 进度回写 section.
+    Note (T13d 建议 6): Only top-level unordered list items (-/*/+ 状态：...) or bare lines containing a valid
+    state emoji are recognized; ordered lists (1. 状态：), table cells, or emoji-less words return None."""
     doc = parse_markdown(text, strip_comments=True)
     for b in extract_progress_blocks(doc):
         if b.kind == "list_item":
@@ -1271,19 +1303,35 @@ class StatusDocument:
     postamble: list[str]
 
 
+_SNAPSHOT_HEAD_RE = re.compile(r"^[\[（(【]?\s*(?:现状一屏|current\s+snapshot)\b", re.I)
+_BARE_ARCHIVE_HEAD_RE = re.compile(
+    r"^[\[（(【]?\s*(?:STATUS[_\s-]*|历史|旧段|更早(?:的)?)*(?:交接段?)?(?:归档|archive(?:d)?)"
+    r"(?:\s*(?:说明|记录|索引|汇总|目录|备注|提示|文件|notes?|summary|index|log))?(?:\s*$|[\s:：—–\-（(\[【])",
+    re.I,
+)
+_ARCHIVE_META_RE = re.compile(
+    r"(?:归档|archive(?:d)?)\s*(?:说明|记录|索引|汇总|目录|备注|提示|notes?|summary|index)\b",
+    re.I,
+)
+
+
 def is_handoff_heading(title: str) -> bool:
     """Recognized handoff headings: contain Handoff/交接, start with date, or start with T<id> + date.
-    Headings like '## 交回说明' or '## 归档说明' are NOT handoff headings."""
+    Headings whose subject is an archive/snapshot notice ('## 归档说明...', '## 2026-09-15 归档说明', '## 现状一屏...')
+    are NOT handoff headings, whereas real handoffs mentioning '归档' in their topic ('## Handoff（2026-11-11，T5 归档整理）') ARE.
+    Note (T13d 建议 2): Both ## and ### are valid handoff levels; avoid using 'Handoff'/'交接' in inner ### subheadings."""
     t = title.strip()
     if not t:
         return False
-    if re.search(r"归档|archive|现状一屏|current\s+snapshot", t, re.I):
+    if _SNAPSHOT_HEAD_RE.match(t) or _BARE_ARCHIVE_HEAD_RE.match(t):
         return False
-    return bool(
+    has_explicit_handoff = bool(
         re.search(r"(?i)handoff|交接", t)
-        or HEADING_DATE_START_RE.match(t)
         or (re.match(r"^[\[（(【]?\s*T\d+[A-Za-z0-9-]*\b", t, re.I) and FLEX_DATE_TOKEN_RE.search(t))
     )
+    if _ARCHIVE_META_RE.search(t) and not has_explicit_handoff:
+        return False
+    return bool(has_explicit_handoff or HEADING_DATE_START_RE.match(t))
 
 
 def trim_blank_lines(ls: list[str]) -> str:
@@ -1381,19 +1429,9 @@ def block_latest_date(seg: str, today: date) -> Optional[date]:
 
 
 def handoffs_latest_date(blocks: list[str], today: date) -> Optional[date]:
-    """Extract latest date across handoff blocks: headings first, then non-code bodies."""
-    if not blocks:
-        return None
-    head_parts: list[str] = []
-    body_parts: list[str] = []
-    for seg in blocks:
-        seg_doc = parse_markdown(seg)
-        if not seg_doc.blocks:
-            continue
-        if seg_doc.blocks[0].kind == "heading":
-            head_parts.append(seg_doc.blocks[0].non_code_text())
-        body_parts.append(non_code_blocks_text(list(seg_doc.blocks), include_inline_code=False))
-    return latest_date("\n".join(head_parts), today) or latest_date("\n\n".join(body_parts), today)
+    """Extract latest date across handoff blocks: per block (heading first, fallback to non-code body), then max."""
+    dates = [d for seg in blocks for d in (block_latest_date(seg, today),) if d is not None]
+    return max(dates) if dates else None
 
 
 def status_fallback_scan(status: str, today: date) -> tuple[Optional[date], list[date], list[str], str]:
