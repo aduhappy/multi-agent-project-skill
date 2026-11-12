@@ -241,16 +241,86 @@ def render_board_lines(rows: list[CardBoardRow]) -> list[str]:
     ]
 
 
-def _prefix_has_table_header(prefix_bytes: bytes) -> bool:
+def _extract_prefix_table_header(prefix_bytes: bytes) -> Optional[tuple[str, tuple[str, ...]]]:
+    """If prefix ends right after a Markdown table header + separator row, return (raw_header_line, header_cells)."""
     txt = prefix_bytes.decode("utf-8", errors="replace")
-    non_empty = [ln.strip() for ln in txt.splitlines() if ln.strip() and not ln.strip().startswith("<!--")]
-    if len(non_empty) < 2:
-        return False
-    return (
-        non_empty[-2].startswith("|")
-        and non_empty[-1].startswith("|")
-        and bool(re.fullmatch(r"\|[\s:|\-]+\|?", non_empty[-1]))
-    )
+    raw_lines = [ln.strip() for ln in txt.splitlines() if ln.strip() and not ln.strip().startswith("<!--")]
+    if len(raw_lines) < 2 or not (
+        raw_lines[-2].startswith("|")
+        and raw_lines[-1].startswith("|")
+        and bool(re.fullmatch(r"\|[\s:|\-]+\|?", raw_lines[-1]))
+    ):
+        return None
+    doc = hl.parse_markdown(txt)
+    non_cm = [b for b in doc.blocks if b.kind != "html_comment"]
+    if (
+        len(non_cm) >= 2
+        and non_cm[-2].kind == "table_row"
+        and non_cm[-1].kind == "table_row"
+        and not non_cm[-2].is_separator
+        and non_cm[-1].is_separator
+        and non_cm[-1].start_line == non_cm[-2].end_line
+    ):
+        return non_cm[-2].lines[0].strip(), non_cm[-2].cells
+    return None
+
+
+def _prefix_has_table_header(prefix_bytes: bytes) -> bool:
+    return _extract_prefix_table_header(prefix_bytes) is not None
+
+
+def validate_cards_marker_region(raw_bytes: bytes, span: MarkerSpan) -> tuple[bool, str]:
+    """Verify existing table header in/above cards marker region contains '编号', '任务名', '状态' before overwriting."""
+    inner_txt = raw_bytes[span.inner_start : span.inner_end].decode("utf-8", errors="replace")
+    inner_doc = hl.parse_markdown(inner_txt)
+    content_blocks = [b for b in inner_doc.blocks if b.kind != "html_comment"]
+
+    prefix_hdr = _extract_prefix_table_header(raw_bytes[: span.inner_start])
+    if prefix_hdr is not None:
+        hdr_raw, hdr_cells = prefix_hdr
+        if not hl.is_cards_table_header(hdr_cells):
+            return (
+                False,
+                f"cards 标记上方现有表头 `{hdr_raw}` 不符合卡清单表要求（须同时含“编号”“任务名”“状态”三列），拒绝写入",
+            )
+        cleaned = [re.sub(r"[*_~`\s]+", "", re.sub(r"<!--.*?-->", "", c, flags=re.S)) for c in hdr_cells]
+        if len(cleaned) != 5 or not ("编号" in cleaned[0] and "任务名" in cleaned[1] and "状态" in cleaned[2]):
+            return (
+                False,
+                f"cards 标记置于表头下方时现有表头 `{hdr_raw}` 列顺序与生成行不一致，请将 <!-- cards:start --> 移至表头上方，拒绝写入",
+            )
+        if any(b.kind != "table_row" or b.is_separator for b in content_blocks):
+            return False, "cards 标记置于表头下方时标记内含非数据行内容，拒绝覆盖写入"
+        for b1, b2 in zip(content_blocks, content_blocks[1:]):
+            if b2.start_line != b1.end_line:
+                return False, "cards 标记区内存在多段表格，为防误覆盖拒绝写入"
+        return True, ""
+
+    if not content_blocks:
+        # Empty <!-- cards:start --> ... <!-- cards:end --> has no existing content at risk
+        return True, ""
+
+    if any(b.kind != "table_row" for b in content_blocks):
+        return (
+            False,
+            "cards 标记区内含非表格内容，为防误覆盖拒绝写入（标记内只应包含表头含“编号”“任务名”“状态”三列的卡清单表）",
+        )
+    for b1, b2 in zip(content_blocks, content_blocks[1:]):
+        if b2.start_line != b1.end_line:
+            return False, "cards 标记区内存在多张表格，为防误覆盖其他表格拒绝写入（请只用标记包裹卡清单表）"
+
+    hdr_blk = content_blocks[0]
+    hdr_raw = hdr_blk.lines[0].strip()
+    if hdr_blk.is_separator:
+        return False, f"cards 标记区内缺少表头行（首行为分隔行 `{hdr_raw}`），拒绝写入"
+    if len(content_blocks) < 2 or not content_blocks[1].is_separator:
+        return False, f"cards 标记区内缺少表格分隔行（首行 `{hdr_raw}`），拒绝写入"
+    if not hl.is_cards_table_header(hdr_blk.cells):
+        return (
+            False,
+            f"cards 标记区内现有表头 `{hdr_raw}` 不符合卡清单表要求（须同时含“编号”“任务名”“状态”三列），拒绝写入",
+        )
+    return True, ""
 
 
 def render_cards_lines(rows: list[CardBoardRow], *, include_header: bool = True) -> list[str]:
@@ -325,6 +395,11 @@ def sync_project(root: Path, *, check_only: bool = False, cfg: Optional[hl.Hando
         if span.state == "malformed":
             errors.append(f"{disp_name} 标记错误：{span.detail}（{add_hint}）")
             continue
+        if tag == "cards":
+            hdr_ok, hdr_err = validate_cards_marker_region(raw_bytes, span)
+            if not hdr_ok:
+                errors.append(f"{disp_name}：{hdr_err}")
+                continue
         if not rows:
             hints.append(f"{cfg.cards_dir}/ 下暂无任务卡，保留 {disp_name} 现有标记区内容不变")
             unchanged.append(disp_name)

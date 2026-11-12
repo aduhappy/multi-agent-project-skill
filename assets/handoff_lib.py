@@ -21,7 +21,7 @@ import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 sys.dont_write_bytecode = True
 
@@ -1953,6 +1953,34 @@ def verify_rules_file(path: Path, min_version: str, display_path: Optional[str] 
     if issues:
         return False, f"{disp}：" + "；".join(issues)
     return True, f"v{file_ver}（sha256={actual_sha[:12]}…）"
+
+
+CARDS_TABLE_REQUIRED_COLS: tuple[str, ...] = ("编号", "任务名", "状态")
+
+
+def is_cards_table_header(cells: Sequence[str]) -> bool:
+    """Return True iff 3 distinct header cells contain '编号', '任务名', and '状态' (ignoring Markdown formatting)."""
+    cleaned: list[str] = []
+    for c in cells:
+        s = re.sub(r"<!--.*?-->", "", c, flags=re.S)
+        s = re.sub(r"[*_~`\s]+", "", s)
+        cleaned.append(s)
+    if len(cleaned) < len(CARDS_TABLE_REQUIRED_COLS):
+        return False
+
+    def _match(req_idx: int, used: set[int]) -> bool:
+        if req_idx == len(CARDS_TABLE_REQUIRED_COLS):
+            return True
+        kw = CARDS_TABLE_REQUIRED_COLS[req_idx]
+        for col_idx, cell_txt in enumerate(cleaned):
+            if col_idx not in used and kw in cell_txt:
+                used.add(col_idx)
+                if _match(req_idx + 1, used):
+                    return True
+                used.remove(col_idx)
+        return False
+
+    return _match(0, set())
 
 
 def _cli_main(argv: Optional[list[str]] = None) -> int:

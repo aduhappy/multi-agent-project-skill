@@ -799,8 +799,12 @@ def advisories(
     if cards_span is not None and cards_span.state != "missing":
         if cards_span.state == "malformed":
             drift.append(f"{index_disp} 标记错误：{cards_span.detail}")
-        elif sb_rows and _sb.compute_synced_bytes(index_raw, cards_span, "cards", sb_rows) != index_raw:
-            drift.append(f"{index_disp} cards 标记区与卡面不一致（请运行 python scripts/sync_board.py）")
+        else:
+            hdr_ok, hdr_err = _sb.validate_cards_marker_region(index_raw, cards_span)
+            if not hdr_ok:
+                drift.append(f"{index_disp} {hdr_err}")
+            elif sb_rows and _sb.compute_synced_bytes(index_raw, cards_span, "cards", sb_rows) != index_raw:
+                drift.append(f"{index_disp} cards 标记区与卡面不一致（请运行 python scripts/sync_board.py）")
     else:
         idx_doc = hl.parse_markdown(index)
         for b in idx_doc.blocks:

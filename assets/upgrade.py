@@ -29,7 +29,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 sys.dont_write_bytecode = True
 
@@ -92,6 +92,16 @@ class PlannedWrite:
 
 
 @dataclass(frozen=True)
+class IndexTransformResult:
+    new_bytes: bytes
+    extracted_old_rules: Optional[bytes]
+    changes: list[str]
+    cards_status: str  # "added" | "already_marked" | "not_found" | "malformed" | "no_index"
+    wrapped_table_header: str = ""
+    wrapped_table_lines: tuple[int, int] = (0, 0)
+
+
+@dataclass(frozen=True)
 class UpgradeReport:
     applied: bool
     writes: list[PlannedWrite]
@@ -100,6 +110,10 @@ class UpgradeReport:
     agents_dup_items: list[str]
     agents_needs_board_markers: bool
     agents_needs_exception_subsec: bool
+    index_rel: str = "文档/任务卡_README.md"
+    cards_status: str = "no_index"
+    wrapped_table_header: str = ""
+    wrapped_table_lines: tuple[int, int] = (0, 0)
 
 
 def resolve_skill_assets(explicit_skill_dir: Optional[str] = None) -> Path:
@@ -166,28 +180,42 @@ def _is_already_rules_pointer(sec_lines: list[str]) -> bool:
     return not any(kw in joined for kw in ("谁改卡面哪里", "别让卡越写越大", "停止条件分两类"))
 
 
+def _group_contiguous_tables(blocks: Sequence[hl.Block], start_ln: int, end_ln: int) -> list[list[hl.Block]]:
+    tbl_rows = [
+        b for b in blocks if b.kind == "table_row" and start_ln <= b.start_line and b.end_line <= end_ln
+    ]
+    tables: list[list[hl.Block]] = []
+    for row in tbl_rows:
+        if tables and row.start_line == tables[-1][-1].end_line:
+            tables[-1].append(row)
+        else:
+            tables.append([row])
+    return tables
+
+
 def _transform_index_file(
     raw_bytes: bytes,
     cfg: hl.HandoffConfig,
-) -> tuple[bytes, Optional[bytes], list[str]]:
-    """Return (new_index_bytes, extracted_old_rules_bytes_or_None, change_descriptions)."""
+) -> IndexTransformResult:
+    """Transform index file: archive old rules section & wrap matching card checklist table."""
     eol_str = hl.detect_eol(raw_bytes)
     has_bom = raw_bytes.startswith(b"\xef\xbb\xbf")
     text = raw_bytes.decode("utf-8-sig")
     norm = text.replace("\r\n", "\n").replace("\r", "\n")
     trailing_nl = norm.endswith("\n")
     lines = norm.splitlines()
+    orig_line_nums = list(range(1, len(lines) + 1))
     changes: list[str] = []
     extracted_old_rules: Optional[bytes] = None
 
     # Step A: Move old `## 卡面规矩` section to 卡面规矩_旧.md and leave 1-line pointer
-    doc = hl.parse_markdown("\n".join(lines), strip_comments=False)
+    doc = hl.parse_markdown("\n".join(lines))
     rules_start: Optional[int] = None
     rules_end: Optional[int] = None
     for b in doc.blocks:
-        if b.kind == "heading" and b.level == 2:
+        if b.kind == "heading" and b.level <= 2:
             if rules_start is None:
-                if b.title.startswith("卡面规矩"):
+                if b.level == 2 and b.title.startswith("卡面规矩"):
                     rules_start = b.start_line
             else:
                 rules_end = b.start_line
@@ -210,50 +238,77 @@ def _transform_index_file(
             replacement = [heading_ln, "", pointer_ln]
             if rules_end < len(lines):
                 replacement.append("")
+            orig_head_ln = orig_line_nums[rules_start]
             lines = lines[:rules_start] + replacement + lines[rules_end:]
+            orig_line_nums = (
+                orig_line_nums[:rules_start]
+                + [orig_head_ln]
+                + [0] * (len(replacement) - 1)
+                + orig_line_nums[rules_end:]
+            )
             changes.append(f"将旧“卡面规矩”节迁出至 {cfg.docs_dir}/_作废/卡面规矩_旧.md 并留指针")
 
-    # Step B: Wrap card checklist table with <!-- cards:start --> ... <!-- cards:end --> if not already marked
+    # Step B: Wrap card checklist table (must contain '编号', '任务名', '状态') with <!-- cards:start/end -->
     current_bytes_probe = ("\n".join(lines) + ("\n" if trailing_nl else "")).encode("utf-8")
-    already_marked = False
     if sb is not None:
-        already_marked = sb.find_marker_span_bytes(current_bytes_probe, "cards").state != "missing"
+        marker_state = sb.find_marker_span_bytes(current_bytes_probe, "cards").state
     else:
-        already_marked = bool(re.search(r"<!--\s*cards:(?:start|end)\s*-->", "\n".join(lines)))
+        marker_state = "ok" if re.search(r"<!--\s*cards:(?:start|end)\s*-->", "\n".join(lines)) else "missing"
 
-    if not already_marked:
-        doc2 = hl.parse_markdown("\n".join(lines), strip_comments=False)
-        # Prefer table inside `## 任务卡清单...`; fallback to first table before `## 卡面规矩`
+    cards_status = "already_marked" if marker_state == "ok" else ("malformed" if marker_state == "malformed" else "not_found")
+    wrapped_hdr = ""
+    wrapped_span = (0, 0)
+
+    if marker_state == "missing":
+        doc2 = hl.parse_markdown("\n".join(lines))
         sec_start = 0
         sec_end = len(lines)
         found_list_sec = False
         for b in doc2.blocks:
-            if b.kind == "heading" and b.level == 2:
-                if not found_list_sec and ("任务卡清单" in b.title or "卡清单" in b.title):
+            if b.kind == "heading" and b.level <= 2:
+                if not found_list_sec and b.level == 2 and ("任务卡清单" in b.title or "卡清单" in b.title):
                     found_list_sec = True
                     sec_start = b.start_line
                 elif found_list_sec:
                     sec_end = b.start_line
                     break
-        if not found_list_sec:
+        if found_list_sec:
+            cand_tables = _group_contiguous_tables(doc2.blocks, sec_start, sec_end)
+        else:
+            excluded_ranges: list[tuple[int, int]] = []
+            cur_excl: Optional[int] = None
             for b in doc2.blocks:
-                if b.kind == "heading" and b.level == 2 and b.title.startswith("卡面规矩"):
-                    sec_end = b.start_line
-                    break
-
-        tbl_blocks = [
-            b for b in doc2.blocks
-            if b.kind == "table_row" and sec_start <= b.start_line and b.end_line <= sec_end
+                if b.kind == "heading" and b.level <= 2:
+                    if cur_excl is not None:
+                        excluded_ranges.append((cur_excl, b.start_line))
+                        cur_excl = None
+                    if b.level == 2 and any(k in b.title for k in ("卡面规矩", "规矩", "规范", "谁改")):
+                        cur_excl = b.start_line
+            if cur_excl is not None:
+                excluded_ranges.append((cur_excl, len(lines)))
+            non_rules_blocks = [
+                b
+                for b in doc2.blocks
+                if not any(es <= b.start_line and b.end_line <= ee for es, ee in excluded_ranges)
+            ]
+            cand_tables = _group_contiguous_tables(non_rules_blocks, 0, len(lines))
+        matching_tables = [
+            tbl
+            for tbl in cand_tables
+            if len(tbl) >= 2
+            and not tbl[0].is_separator
+            and tbl[1].is_separator
+            and hl.is_cards_table_header(tbl[0].cells)
         ]
-        if tbl_blocks:
-            first_tbl_ln = tbl_blocks[0].start_line
-            # Contiguous table rows starting at first_tbl_ln
-            last_tbl_ln = tbl_blocks[0].end_line
-            for tb in tbl_blocks[1:]:
-                if tb.start_line == last_tbl_ln:
-                    last_tbl_ln = tb.end_line
-                else:
-                    break
+        if matching_tables:
+            chosen = matching_tables[0]
+            first_tbl_ln = chosen[0].start_line
+            last_tbl_ln = chosen[-1].end_line
+            orig_s = orig_line_nums[first_tbl_ln] or (first_tbl_ln + 1)
+            orig_e = orig_line_nums[last_tbl_ln - 1] or last_tbl_ln
+            wrapped_hdr = lines[first_tbl_ln].strip()
+            wrapped_span = (orig_s, orig_e)
+            cards_status = "added"
             lines = (
                 lines[:first_tbl_ln]
                 + ["<!-- cards:start -->"]
@@ -261,14 +316,33 @@ def _transform_index_file(
                 + ["<!-- cards:end -->"]
                 + lines[last_tbl_ln:]
             )
-            changes.append("在任务卡清单表上下添加 <!-- cards:start --> 与 <!-- cards:end --> 标记")
+            changes.append(
+                "在任务卡清单表上下添加 <!-- cards:start --> 与 <!-- cards:end --> 标记"
+                f"（第 {orig_s}–{orig_e} 行，表头第 {orig_s} 行：{wrapped_hdr}）"
+            )
+        else:
+            cards_status = "not_found"
 
     if not changes:
-        return raw_bytes, None, []
+        return IndexTransformResult(
+            new_bytes=raw_bytes,
+            extracted_old_rules=None,
+            changes=[],
+            cards_status=cards_status,
+            wrapped_table_header=wrapped_hdr,
+            wrapped_table_lines=wrapped_span,
+        )
 
     rebuilt = eol_str.join(lines) + (eol_str if trailing_nl else "")
     out_bytes = (b"\xef\xbb\xbf" if has_bom else b"") + rebuilt.encode("utf-8")
-    return out_bytes, extracted_old_rules, changes
+    return IndexTransformResult(
+        new_bytes=out_bytes,
+        extracted_old_rules=extracted_old_rules,
+        changes=changes,
+        cards_status=cards_status,
+        wrapped_table_header=wrapped_hdr,
+        wrapped_table_lines=wrapped_span,
+    )
 
 
 def inspect_agents_readonly(root: Path) -> tuple[list[str], bool, bool]:
@@ -360,35 +434,42 @@ def plan_and_run_upgrade(
 
     # 3 & 4. <index_file>: move old ## 卡面规矩 to <docs_dir>/_作废/卡面规矩_旧.md + add cards markers
     index_fp = root / cfg.index_file
+    index_rel = cfg.index_file
+    cards_status = "no_index"
+    wrapped_hdr = ""
+    wrapped_span = (0, 0)
     if index_fp.is_file():
         _assert_never_protected(index_fp, root, cfg)
+        index_rel = index_fp.relative_to(root).as_posix()
         idx_orig = index_fp.read_bytes()
-        idx_new, old_rules_bytes, idx_changes = _transform_index_file(idx_orig, cfg)
-        if old_rules_bytes is not None:
+        idx_res = _transform_index_file(idx_orig, cfg)
+        cards_status = idx_res.cards_status
+        wrapped_hdr = idx_res.wrapped_table_header
+        wrapped_span = idx_res.wrapped_table_lines
+        if idx_res.extracted_old_rules is not None:
             archive_old_fp = root / cfg.docs_dir / "_作废" / "卡面规矩_旧.md"
             _assert_never_protected(archive_old_fp, root, cfg)
             old_existed = archive_old_fp.is_file()
-            if not old_existed or archive_old_fp.read_bytes() != old_rules_bytes:
+            if not old_existed or archive_old_fp.read_bytes() != idx_res.extracted_old_rules:
                 rel_old = archive_old_fp.relative_to(root).as_posix()
                 planned.append(
                     PlannedWrite(
                         rel_path=rel_old,
                         abs_path=archive_old_fp,
-                        new_bytes=old_rules_bytes,
+                        new_bytes=idx_res.extracted_old_rules,
                         existed=old_existed,
                         summary=f"归档旧卡面规矩至 {rel_old}",
                         backup_needed=old_existed,
                     )
                 )
-        if idx_new != idx_orig:
-            rel_idx = index_fp.relative_to(root).as_posix()
+        if idx_res.new_bytes != idx_orig:
             planned.append(
                 PlannedWrite(
-                    rel_path=rel_idx,
+                    rel_path=index_rel,
                     abs_path=index_fp,
-                    new_bytes=idx_new,
+                    new_bytes=idx_res.new_bytes,
                     existed=True,
-                    summary=f"修改 {rel_idx}（{'；'.join(idx_changes)}）",
+                    summary=f"修改 {index_rel}（{'；'.join(idx_res.changes)}）",
                     backup_needed=True,
                 )
             )
@@ -422,6 +503,10 @@ def plan_and_run_upgrade(
         agents_dup_items=dup_items,
         agents_needs_board_markers=needs_board_markers,
         agents_needs_exception_subsec=needs_exc_subsec,
+        index_rel=index_rel,
+        cards_status=cards_status,
+        wrapped_table_header=wrapped_hdr,
+        wrapped_table_lines=wrapped_span,
     )
 
 
@@ -469,6 +554,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         elif not rep.applied:
             cfg = hl.load_handoff_config(root)
             print(f"写盘前将备份原有文件至：{cfg.docs_dir}/_作废/升级前_{cur_day.isoformat()}/")
+
+    if rep.cards_status == "not_found":
+        print(
+            f"\n⚠️ 未找到卡清单表，请人工加标记：在 {rep.index_rel} 中未找到表头同时含“编号”“任务名”“状态”三列的表格，未自动加标记。"
+        )
+        print(f"  请在 {rep.index_rel} 的卡清单表上下手工添加如下标记写法：")
+        print("    <!-- cards:start -->")
+        print("    | 编号 | 任务名 | 状态 | 依赖 | 文件 |")
+        print("    |---|---|---|---|---|")
+        print("    ...")
+        print("    <!-- cards:end -->")
 
     print("\n--- AGENTS.md 手工整理清单（脚本不自动修改 AGENTS.md） ---")
     if rep.agents_dup_items:

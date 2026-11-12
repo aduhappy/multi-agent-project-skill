@@ -2896,7 +2896,8 @@ def test_050_conv3_sync_board() -> None:
 
         idx_prefix = b"# \xe7\xb4\xa2\xe5\xbc\x95\n\n<!-- cards:start -->\n"
         idx_suffix = b"<!-- cards:end -->\n\n## \xe5\xb0\xbe\xe6\xb3\xa8\n\xe4\xbf\x9d\xe7\x95\x99\xe4\xb8\x8d\xe5\x8a\xa8\xe3\x80\x82\n"
-        (line / "文档" / "任务卡_README.md").write_bytes(idx_prefix + b"| old |\n" + idx_suffix)
+        idx_old_inner = "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n|---|---|---|---|---|\n| T0 | old | ⬜可派 | — | x |\n".encode("utf-8")
+        (line / "文档" / "任务卡_README.md").write_bytes(idx_prefix + idx_old_inner + idx_suffix)
 
         r_sync1 = run_sb(line)
         check(r_sync1.returncode == 0, f"sync_board must succeed:\n{r_sync1.stdout}\n{r_sync1.stderr}")
@@ -3258,6 +3259,154 @@ def test_050_conv6_extras_and_t13d() -> None:
         )
 
 
+def test_050_r1_f1_cards_table_header_validation() -> None:
+    """0.5.0 R1-F1: upgrade.py & sync_board.py validate card checklist header ('编号'+'任务名'+'状态'), report header/lines, and never overwrite wrong tables."""
+    upg_script = ASSETS_DIR / "upgrade.py"
+    sync_script = ASSETS_DIR / "sync_board.py"
+
+    def run_upg(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(upg_script), str(target), "--skill-dir", str(ASSETS_DIR), "--today", TODAY, *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    def run_sb(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(sync_script), str(target), *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    # 1. Exact Sample D from review report: stat table `| 状态 | 数量 |` placed before card checklist table
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(line / "文档" / "任务卡" / "T1a_盘点.md", "# T1a NAS 已有数据盘点\n> 依赖：无\n\n## 进度回写\n- 状态：✅已收口\n")
+        write(line / "文档" / "任务卡" / "T1b_获取.md", "# T1b GEE 缺口数据获取\n> 依赖：T1a\n\n## 进度回写\n- 状态：⬜可派\n\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n")
+        sample_d_index = (
+            "# 任务卡目录索引\n"                  # L1
+            "\n"                                   # L2
+            "## 任务卡清单\n"                       # L3
+            "| 状态 | 数量 |\n"                    # L4
+            "|---|---|\n"                          # L5
+            "| ✅ | 40 |\n"                        # L6
+            "\n"                                   # L7
+            "（每卡一行，任务名 ≤30 字；细节在卡里）\n"  # L8
+            "\n"                                   # L9
+            "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n"  # L10
+            "|---|---|---|---|---|\n"              # L11
+            "| T1a | 旧名 | ✅已收口 | 无 | `任务卡/T1a_盘点.md` |\n"  # L12
+            "\n"                                   # L13
+            "## 卡面规矩（主控出卡、改卡时照做）\n\n**谁改卡面哪里**\n\n| 位置 | 执行方 |\n|---|---|\n| 进度回写 | 改 |\n"
+        )
+        write(line / "文档" / "任务卡_README.md", sample_d_index)
+
+        r_prev = run_upg(line)
+        check(
+            r_prev.returncode == 0
+            and "| 编号 | 任务名 | 状态 | 依赖 | 文件 |" in r_prev.stdout
+            and "第 10–12 行" in r_prev.stdout
+            and "表头第 10 行" in r_prev.stdout,
+            f"F1 preview must state verbatim header and 1-based line numbers (L10-L12):\n{r_prev.stdout}",
+        )
+        r_app = run_upg(line, "--apply")
+        check(
+            r_app.returncode == 0
+            and "| 编号 | 任务名 | 状态 | 依赖 | 文件 |" in r_app.stdout
+            and "第 10–12 行" in r_app.stdout
+            and "表头第 10 行" in r_app.stdout,
+            f"F1 --apply must state verbatim header and 1-based line numbers (L10-L12):\n{r_app.stdout}",
+        )
+
+        r_sb = run_sb(line)
+        check(r_sb.returncode == 0, f"sync_board after Sample D upgrade must succeed:\n{r_sb.stdout}\n{r_sb.stderr}")
+        after_idx = (line / "文档" / "任务卡_README.md").read_text(encoding="utf-8")
+        check(
+            "| 状态 | 数量 |\n|---|---|\n| ✅ | 40 |" in after_idx
+            and "NAS 已有数据盘点" in after_idx
+            and "GEE 缺口数据获取" in after_idx,
+            f"F1 Sample D stat table MUST survive upgrade + sync_board intact while card table updates:\n{after_idx}",
+        )
+
+    # 2. Variant F1-a: reordered & bold/inline-code header (`| **状态** | `任务名称` | **编号** | 文件 | 依赖 |`) after legend table
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(line / "文档" / "任务卡" / "T1_清洗.md", "# T1 数据清洗\n> 依赖：无\n\n## 进度回写\n- 状态：✅已收口\n")
+        reordered_hdr = "| **状态** | `任务名称` | **编号** | 文件 | 依赖 |"
+        var_a_index = (
+            "# 索引\n\n## 任务卡清单\n"
+            "| 图标 | 说明 |\n|---|---|\n| ⬜ | 可派 |\n\n"
+            f"{reordered_hdr}\n"
+            "|---|---|---|---|---|\n"
+            "| ⬜ | 旧 | T1 | x | 无 |\n"
+        )
+        write(line / "文档" / "任务卡_README.md", var_a_index)
+        r_app_a = run_upg(line, "--apply")
+        check(
+            r_app_a.returncode == 0 and reordered_hdr in r_app_a.stdout and "表头第 8 行" in r_app_a.stdout,
+            f"F1 variant (reordered + bold header) must be recognized with exact line 8:\n{r_app_a.stdout}",
+        )
+        r_sb_a = run_sb(line)
+        check(r_sb_a.returncode == 0, f"sync_board must accept reordered+bold card table header:\n{r_sb_a.stderr}")
+        after_a = (line / "文档" / "任务卡_README.md").read_text(encoding="utf-8")
+        check("| 图标 | 说明 |\n|---|---|\n| ⬜ | 可派 |" in after_a and "| T1 | 数据清洗 |" in after_a, f"legend table lost:\n{after_a}")
+
+    # 3. Variant F1-b: no table matches ('编号'+'任务名'+'状态') -> adds NO markers, prints manual hint & marker syntax
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(line / "文档" / "任务卡" / "T1_清洗.md", "# T1 清洗\n\n## 进度回写\n- 状态：✅已收口\n")
+        no_match_idx = (
+            "# 索引\n\n## 任务卡清单\n"
+            "| 状态 | 数量 |\n|---|---|\n| ✅ | 1 |\n\n"
+            "| 卡 | 做什么 | 状态 | 文件 |\n|---|---|---|---|\n| T1 | 清洗 | ✅ | x |\n"
+        )
+        write(line / "文档" / "任务卡_README.md", no_match_idx)
+        r_prev_b = run_upg(line)
+        r_app_b = run_upg(line, "--apply")
+        for mode_lbl, r_out in (("preview", r_prev_b.stdout), ("apply", r_app_b.stdout)):
+            check(
+                "未找到卡清单表，请人工加标记" in r_out and "<!-- cards:start -->" in r_out and "<!-- cards:end -->" in r_out,
+                f"F1 ({mode_lbl}) must print '未找到卡清单表，请人工加标记' and marker syntax:\n{r_out}",
+            )
+        check(
+            (line / "文档" / "任务卡_README.md").read_text(encoding="utf-8") == no_match_idx,
+            "F1 must NOT add cards markers when no table header has 编号+任务名+状态",
+        )
+
+    # 4. sync_board.py pre-write header check: wrong table inside cards markers -> refuses to write (rc=1, 0 bytes changed)
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(line / "文档" / "协作规矩.md", (ASSETS_DIR / "协作规矩.md").read_text(encoding="utf-8"))
+        write(line / "文档" / "任务卡" / "T1_清洗.md", "# T1 清洗\n\n## 进度回写\n- 状态：✅已收口\n")
+        wrong_wrapped = (
+            "# 索引\n\n## 任务卡清单\n"
+            "<!-- cards:start -->\n"
+            "| 状态 | 数量 |\n"
+            "|---|---|\n"
+            "| ✅ | 40 |\n"
+            "<!-- cards:end -->\n"
+        ).encode("utf-8")
+        idx_fp = line / "文档" / "任务卡_README.md"
+        idx_fp.write_bytes(wrong_wrapped)
+
+        r_bad_write = run_sb(line)
+        r_bad_chk = run_sb(line, "--check")
+        combined_bad = r_bad_write.stdout + r_bad_write.stderr
+        check(
+            r_bad_write.returncode == 1
+            and r_bad_chk.returncode == 1
+            and idx_fp.read_bytes() == wrong_wrapped
+            and "| 状态 | 数量 |" in combined_bad
+            and "拒绝写入" in combined_bad,
+            f"F1 sync_board must refuse overwriting wrong table inside cards markers:\n{combined_bad}",
+        )
+        rc_a007, out_a007 = run(line)
+        check(rc_a007 == 0 and "[A007] ⚠️" in out_a007 and "不符合卡清单表要求" in out_a007, f"A007 must warn on wrong cards header:\n{out_a007}")
+
+        # Empty <!-- cards:start -->\n<!-- cards:end --> (0 content at risk) populates cleanly
+        idx_fp.write_text("# 索引\n\n<!-- cards:start -->\n<!-- cards:end -->\n", encoding="utf-8")
+        r_empty = run_sb(line)
+        check(r_empty.returncode == 0 and "| 编号 | 任务名 | 状态 | 依赖 | 文件 |" in idx_fp.read_text(encoding="utf-8"), f"empty markers must populate:\n{r_empty.stderr}")
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -3452,6 +3601,7 @@ def main(argv: list[str] | None = None) -> int:
     test_050_conv4_agents_template()
     test_050_conv5_upgrade()
     test_050_conv6_extras_and_t13d()
+    test_050_r1_f1_cards_table_header_validation()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")
