@@ -135,10 +135,13 @@ def test_asset_sizes() -> None:
         ("assets/协作规矩.md", 25_000),
         ("assets/任务卡_README.md", 15_000),
         ("assets/任务卡_模板.md", 6_000),
+        ("assets/AGENTS.md", 6_000),
     ):
         fp = REPO / rel
         size = len(fp.read_bytes())
         check(size <= limit, f"{rel} exceeded {limit} bytes: {size}B")
+    agents_lines = (REPO / "assets" / "AGENTS.md").read_text(encoding="utf-8").splitlines()
+    check(len(agents_lines) <= 70, f"assets/AGENTS.md exceeded 70 lines: {len(agents_lines)} lines")
 
 
 def test_040_features() -> None:
@@ -524,11 +527,14 @@ def test_r1_asset_keywords_and_restored_refs() -> None:
         "闸门查交付物本身",
         "计数和派生数一律脚本给出",
         "主控收口三查",
+        "archive_status.py",
+        "重开最终交付物",
+        "计数与派生数一律由脚本",
     ):
         check(kw in rules_tpl, f"assets/协作规矩.md missing keyword: {kw}")
 
     agents_tpl = (REPO / "assets" / "AGENTS.md").read_text(encoding="utf-8")
-    for kw in ("archive_status.py", "环境坑.md", "重开最终交付物", "计数与派生数一律由脚本", "决策登记表_全文.md"):
+    for kw in ("环境坑.md", "决策登记表_全文.md", "文档/协作规矩.md", "文档/关键数字.md", "本项目例外", "<!-- board:start -->", "<!-- board:end -->"):
         check(kw in agents_tpl, f"assets/AGENTS.md missing keyword: {kw}")
 
     card_tpl = (REPO / "assets" / "任务卡_模板.md").read_text(encoding="utf-8")
@@ -584,12 +590,20 @@ def test_041_a1_board_template() -> None:
             "# T1 数据清洗\n\n## 进度回写\n- 状态：⬜可派\n\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n",
         )
         base_head = (line / "AGENTS.md").read_text(encoding="utf-8").split("## 4. 任务看板")[0]
-        # Case 1: §4 copied directly from assets/AGENTS.md (only template placeholder lines)
+        # Case 1: §4 copied directly from assets/AGENTS.md (with board markers + template placeholder lines)
         write(line / "AGENTS.md", base_head + sec4_tpl + "\n")
         rc, out = run(line)
         check(rc == 1 and "[H008] ❌" in out, "board with only template rows must fail H008:\n" + out)
         check("[A004] ⚠️" in out, "board with only template rows must not pass A004:\n" + out)
-        check("[A007] ✅" in out, "template §4 must not collide with real T1 card on A007:\n" + out)
+        check(
+            "[A007] ⚠️" in out and "sync_board.py" in out and "T1 卡面" not in out,
+            "marked template §4 must prompt sync_board.py on A007 without false status collision on T1:\n" + out,
+        )
+        # Legacy unmarked §4 with Tx/Ty/Tz placeholders still passes A007 directly
+        sec4_unmarked = sec4_tpl.replace("<!-- board:start -->\n", "").replace("<!-- board:end -->\n", "").replace("<!-- board:end -->", "")
+        write(line / "AGENTS.md", base_head + sec4_unmarked + "\n")
+        rc_unm, out_unm = run(line)
+        check("[A007] ✅" in out_unm, "unmarked template §4 must not collide with real T1 card on A007:\n" + out_unm)
 
         # Case 2: Even if user left old pre-ticked `[x] **T1【待填】**`, H008 & A004 still reject template-only board
         write(
@@ -1003,11 +1017,13 @@ def test_041_b1_archive_preserves_eol() -> None:
 
 
 def test_041_c1_agents_cross_family_review() -> None:
-    """C1: assets/AGENTS.md §5 requires cross-model-family independent review for paper conclusions/headline numbers."""
+    """C1: Universal cross-family review rule lives in assets/协作规矩.md §三; assets/AGENTS.md §5 points to 文档/协作规矩.md."""
     agents_tpl = (REPO / "assets" / "AGENTS.md").read_text(encoding="utf-8")
     sec5 = checker_mod.section(agents_tpl, "5", {"铁律 / 约定", "铁律"})
-    check("必须跨模型家族独立复核" in sec5, "assets/AGENTS.md §5 must say 必须跨模型家族独立复核")
+    check("文档/协作规矩.md" in sec5 and "本项目例外" in sec5, "assets/AGENTS.md §5 must point to 文档/协作规矩.md and include 本项目例外")
     check("复核人不同" not in sec5, "assets/AGENTS.md §5 must remove outdated （复核人不同） wording")
+    rules_tpl = (REPO / "assets" / "协作规矩.md").read_text(encoding="utf-8")
+    check("必须跨模型家族独立复核" in rules_tpl and "复核人不同" not in rules_tpl, "assets/协作规矩.md must say 必须跨模型家族独立复核")
 
 
 def test_041_c2_example_filled_agents() -> None:
@@ -2930,6 +2946,38 @@ def test_050_conv3_sync_board() -> None:
         check(run_sb(line, "--check").returncode == 1, "--check must exit 1 when duplicate card IDs exist")
 
 
+def test_050_conv4_agents_template() -> None:
+    """0.5.0 Convention 4: assets/AGENTS.md <=6KB & <=70 lines, keeps §1–§7/§3.5/§5.5, §4 board markers, §5 slim + 本项目例外, §6 pointers."""
+    ag_fp = ASSETS_DIR / "AGENTS.md"
+    raw = ag_fp.read_bytes()
+    txt = raw.decode("utf-8")
+    lines = txt.splitlines()
+    check(len(raw) <= 6_000, f"assets/AGENTS.md must be <= 6000B, got {len(raw)}B")
+    check(len(lines) <= 70, f"assets/AGENTS.md must be <= 70 lines, got {len(lines)} lines")
+
+    doc = hl_mod.parse_markdown(txt, strip_comments=False)
+    h2_nums = [re.match(r"^(\d+(?:\.\d+)?)\b", b.title).group(1) for b in doc.blocks if b.kind == "heading" and b.level == 2 and re.match(r"^(\d+(?:\.\d+)?)\b", b.title)]
+    expected_secs = ["1", "2", "3", "3.5", "4", "5", "5.5", "6", "7"]
+    check(h2_nums == expected_secs, f"assets/AGENTS.md section numbers must stay {expected_secs}, got {h2_nums}")
+
+    sec4 = checker_mod.section(txt, "4", {"下一步任务看板", "任务看板"})
+    check("<!-- board:start -->" in sec4 and "<!-- board:end -->" in sec4, f"assets/AGENTS.md §4 must include board markers:\n{sec4}")
+
+    sec5 = checker_mod.section(txt, "5", {"铁律 / 约定", "铁律"})
+    check(
+        "不可混用的维度" in sec5 and "本项目例外" in sec5 and "文档/协作规矩.md" in sec5,
+        f"assets/AGENTS.md §5 must retain 不可混用的维度, 本项目例外, and pointer to 文档/协作规矩.md:\n{sec5}",
+    )
+    for moved_item in ("- **代码归位**", "- **收工规矩**", "- **独立复核分级阀门**", "- **坏产物退役隔离**"):
+        check(moved_item not in sec5, f"assets/AGENTS.md §5 must move universal rule {moved_item} out to 协作规矩.md")
+
+    sec6 = checker_mod.section(txt, "6", {"深读指针"})
+    check(
+        "文档/协作规矩.md" in sec6 and "文档/关键数字.md" in sec6,
+        f"assets/AGENTS.md §6 must link 文档/协作规矩.md and 文档/关键数字.md:\n{sec6}",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -3121,6 +3169,7 @@ def main(argv: list[str] | None = None) -> int:
     test_050_conv1_collab_rules()
     test_050_conv2_card_template_and_a017()
     test_050_conv3_sync_board()
+    test_050_conv4_agents_template()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")
