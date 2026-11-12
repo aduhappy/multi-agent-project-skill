@@ -758,22 +758,70 @@ def advisories(
         if len(fnames) > 1
     ]
 
-    idx_doc = hl.parse_markdown(index)
-    drift = []
-    for b in idx_doc.blocks:
-        if b.kind != "table_row" or b.is_separator:
-            continue
-        row_raw = b.lines[0]
-        cells = [c.strip(" *`") for c in b.cells]
-        for cid, (state, name) in states.items():
-            mark = hl.STATE_RE.search("|".join(cells[1:]))
-            if (
-                (cells[0].upper() == cid.upper() or name.lower() in row_raw.lower())
-                and mark
-                and (mark.group(0) in hl.CLOSED) != (state in hl.CLOSED)
-            ):
-                drift.append(f"{cid} 卡面 {state}／索引 {mark.group(0)}")
-    drift.extend(sec4_card_drifts(board_items, states))
+    try:
+        import sync_board as _sb
+    except ImportError as _sb_exc:
+        if getattr(_sb_exc, "name", None) in (None, "sync_board"):
+            _sb = None  # type: ignore[assignment]
+        else:
+            raise
+
+    agents_fp = root / "AGENTS.md"
+    index_fp = root / cfg.index_file
+    agents_raw = agents_fp.read_bytes() if agents_fp.is_file() else b""
+    index_raw = index_fp.read_bytes() if index_fp.is_file() else b""
+
+    drift: list[str] = []
+    used_sync_board = False
+    if _sb is not None:
+        board_span = _sb.find_marker_span_bytes(agents_raw, "board") if agents_raw else _sb.MarkerSpan(state="missing")
+        cards_span = _sb.find_marker_span_bytes(index_raw, "cards") if index_raw else _sb.MarkerSpan(state="missing")
+        if board_span.state != "missing" or cards_span.state != "missing":
+            used_sync_board = True
+            sb_rows, sb_dups, _ = _sb.collect_cards(root, cfg)
+            for d_msg in sb_dups:
+                if d_msg not in dup_card_issues:
+                    dup_card_issues.append(d_msg)
+        else:
+            sb_rows = []
+    else:
+        board_span = None
+        cards_span = None
+        sb_rows = []
+        if re.search(r"<!--\s*(?:board|cards):(?:start|end)\s*-->", agents + "\n" + index):
+            drift.append("检测到看板标记但未找到 sync_board.py（请将 sync_board.py 一起复制到 scripts/）")
+
+    # 1) 任务卡索引：有 cards 标记时调用 sync_board --check 逻辑；无标记时沿用 0.4.2 行为
+    if cards_span is not None and cards_span.state != "missing":
+        if cards_span.state == "malformed":
+            drift.append(f"{index_disp} 标记错误：{cards_span.detail}")
+        elif sb_rows and _sb.compute_synced_bytes(index_raw, cards_span, "cards", sb_rows) != index_raw:
+            drift.append(f"{index_disp} cards 标记区与卡面不一致（请运行 python scripts/sync_board.py）")
+    else:
+        idx_doc = hl.parse_markdown(index)
+        for b in idx_doc.blocks:
+            if b.kind != "table_row" or b.is_separator:
+                continue
+            row_raw = b.lines[0]
+            cells = [c.strip(" *`") for c in b.cells]
+            for cid, (state, name) in states.items():
+                mark = hl.STATE_RE.search("|".join(cells[1:]))
+                if (
+                    (cells[0].upper() == cid.upper() or name.lower() in row_raw.lower())
+                    and mark
+                    and (mark.group(0) in hl.CLOSED) != (state in hl.CLOSED)
+                ):
+                    drift.append(f"{cid} 卡面 {state}／索引 {mark.group(0)}")
+
+    # 2) AGENTS.md §4：有 board 标记时调用 sync_board --check 逻辑；无标记时沿用 0.4.2 行为
+    if board_span is not None and board_span.state != "missing":
+        if board_span.state == "malformed":
+            drift.append(f"AGENTS.md 标记错误：{board_span.detail}")
+        elif sb_rows and _sb.compute_synced_bytes(agents_raw, board_span, "board", sb_rows) != agents_raw:
+            drift.append("AGENTS.md §4 board 标记区与卡面不一致（请运行 python scripts/sync_board.py）")
+    else:
+        drift.extend(sec4_card_drifts(board_items, states))
+
     a007_issues: list[str] = []
     if dup_card_issues:
         a007_issues.extend(dup_card_issues)
@@ -783,9 +831,14 @@ def advisories(
         )
     if drift:
         a007_issues.append("；".join(drift[:6]) + ("…" if len(drift) > 6 else ""))
+    a007_title = (
+        "卡面状态与 §4 看板、任务卡索引一致（sync_board 标记比对）"
+        if used_sync_board
+        else "卡面状态与 §4 看板、任务卡索引一致（只比收口与否）"
+    )
     add(
         "A007",
-        "卡面状态与 §4 看板、任务卡索引一致（只比收口与否）",
+        a007_title,
         not a007_issues,
         ("；".join(a007_issues) + "；对不上以卡面为准，主控收口时同步 §4 与索引")
         if a007_issues

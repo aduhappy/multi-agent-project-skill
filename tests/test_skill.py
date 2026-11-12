@@ -391,11 +391,10 @@ def test_r1_a007_merged_inline_states() -> None:
 
 
 def test_r1_index_template_no_collision() -> None:
-    """Fresh skeleton copying assets/任务卡_README.md + real T1 card (⬜可派) passes A007 on first run."""
+    """Fresh skeleton copying assets/任务卡_README.md + real T1 card (⬜可派) passes A007 once synced (and never collides Tx/Tz without markers)."""
     with tempfile.TemporaryDirectory() as temp:
         line = build(Path(temp))
         index_asset = (REPO / "assets" / "任务卡_README.md").read_text(encoding="utf-8")
-        write(line / "文档" / "任务卡_README.md", index_asset)
         write(
             line / "文档" / "任务卡" / "T1_数据清洗.md",
             "# T1 数据清洗\n\n## 进度回写\n- 状态：⬜可派\n\n"
@@ -406,10 +405,30 @@ def test_r1_index_template_no_collision() -> None:
             line / "AGENTS.md",
             base_agents.split("## 4. 任务看板")[0] + "## 4. 任务看板\n- [x] **T0 初始化**\n- [ ] **T1 数据清洗**\n",
         )
-        rc, out = run(line)
+        # 1) Legacy mode (without cards markers): Tx/Ty/Tz rows must not collide with real T1 card
+        legacy_index = index_asset.replace("<!-- cards:start -->\n", "").replace("<!-- cards:end -->\n", "")
+        write(line / "文档" / "任务卡_README.md", legacy_index)
+        rc_leg, out_leg = run(line)
         check(
-            rc == 0 and "[A007] ✅" in out and "[A005] ✅" in out,
-            "fresh skeleton with verbatim 任务卡_README.md template and T1 ⬜ card must pass A007 & A005:\n" + out,
+            rc_leg == 0 and "[A007] ✅" in out_leg and "[A005] ✅" in out_leg,
+            "legacy 任务卡_README.md without markers + T1 ⬜ card must pass A007 & A005:\n" + out_leg,
+        )
+        # 2) 0.5.0 mode (with cards markers): warns to run sync_board.py before sync, passes A007 after sync_board.py
+        write(line / "文档" / "任务卡_README.md", index_asset)
+        rc_unsync, out_unsync = run(line)
+        check(
+            rc_unsync == 0 and "[A007] ⚠️" in out_unsync and "sync_board.py" in out_unsync,
+            "marked 任务卡_README.md with unsynced Tx/Ty/Tz must prompt sync_board.py on A007:\n" + out_unsync,
+        )
+        res_sb = subprocess.run(
+            [sys.executable, "-B", str(ASSETS_DIR / "sync_board.py"), str(line)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(res_sb.returncode == 0, f"sync_board.py must succeed:\n{res_sb.stdout}\n{res_sb.stderr}")
+        rc_sync, out_sync = run(line)
+        check(
+            rc_sync == 0 and "[A007] ✅" in out_sync and "[A005] ✅" in out_sync,
+            "marked 任务卡_README.md after sync_board.py must pass A007 & A005:\n" + out_sync,
         )
 
 
@@ -2768,6 +2787,149 @@ def test_050_conv2_card_template_and_a017() -> None:
         check(rc == 0 and "[A017] ✅" in out, f"deprecated 🗄️ card must not trigger A017:\n{out}")
 
 
+def test_050_conv3_sync_board() -> None:
+    """0.5.0 Convention 3: sync_board.py byte-exact marker splicing, natural sort, >30-char truncation, legacy/edge headers, --check & A007."""
+    sync_script = ASSETS_DIR / "sync_board.py"
+    check(sync_script.is_file(), "assets/sync_board.py must exist")
+
+    def run_sb(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(sync_script), str(target), *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(line / "文档" / "协作规矩.md", (ASSETS_DIR / "协作规矩.md").read_text(encoding="utf-8"))
+
+        # 1. Missing markers -> touches 0 bytes, prints how to add markers, exits 0
+        ag_no_mark = (line / "AGENTS.md").read_bytes()
+        write(line / "文档" / "任务卡_README.md", "# 索引\n\n| 编号 | 任务名 |\n|---|---|\n")
+        idx_no_mark = (line / "文档" / "任务卡_README.md").read_bytes()
+        write(line / "文档" / "任务卡" / "T1_清洗.md", "# T1 清洗\n\n## 进度回写\n- 状态：✅已收口\n")
+        r_miss = run_sb(line)
+        check(
+            r_miss.returncode == 0
+            and "board:start" in r_miss.stdout
+            and "cards:start" in r_miss.stdout
+            and (line / "AGENTS.md").read_bytes() == ag_no_mark
+            and (line / "文档" / "任务卡_README.md").read_bytes() == idx_no_mark,
+            f"missing markers must leave files byte-identical and print hints:\n{r_miss.stdout}\n{r_miss.stderr}",
+        )
+
+        # 2. Malformed marker (start without end) -> refuses to write, 100% byte-identical, exits 1, A007 warns
+        malformed_ag = ag_no_mark + b"\n<!-- board:start -->\n- [ ] broken\n"
+        (line / "AGENTS.md").write_bytes(malformed_ag)
+        r_mal = run_sb(line)
+        check(
+            r_mal.returncode == 1
+            and "缺少闭合" in (r_mal.stdout + r_mal.stderr)
+            and (line / "AGENTS.md").read_bytes() == malformed_ag,
+            f"unclosed marker must fail with rc=1 and touch 0 bytes:\n{r_mal.stdout}\n{r_mal.stderr}",
+        )
+        rc_chk_mal, out_chk_mal = run(line)
+        check(rc_chk_mal == 0 and "[A007] ⚠️" in out_chk_mal and "标记错误" in out_chk_mal, f"A007 must warn on unclosed marker:\n{out_chk_mal}")
+
+        # 3. Diverse card headers: natural order (T1a < T2 < T10 < T10b), >30-char truncation, pipe & star, empty dep, legacy H1 without ID
+        cards_dir = line / "文档" / "任务卡"
+        (cards_dir / "T1_清洗.md").unlink()
+        write(
+            cards_dir / "T10b_配图.md",
+            "# T10b：超长任务名称测试一二三四五六七八九十甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳\n"
+            "> 依赖：T2、T10\n"
+            "> 产物类型：数据与出图　成品给谁看：对外\n\n"
+            "## 进度回写\n- 状态：⏳执行中（进行一半）\n\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n",
+        )
+        write(
+            cards_dir / "T10_打包.md",
+            "# T10 含竖线|和*星号*的任务\n> 依赖：\n> 产物类型：格式整理　成品给谁看：内部\n\n"
+            "## 进度回写\n- 状态：🗄️作废（由 T10b 接续）\n",
+        )
+        write(
+            cards_dir / "T2_预处理.md",
+            "# 没有卡号前缀的旧版一级标题\n\n## 进度回写\n- 状态：✅已收口\n",
+        )
+        write(
+            cards_dir / "T1a_盘点.md",
+            "# T1a 盘点数据源\n> 依赖：无\n> 产物类型：数据与出图　成品给谁看：内部\n\n"
+            "## 进度回写\n- 状态：✅已收口（D-01）\n",
+        )
+
+        # Put CRLF + exact custom bytes outside markers in AGENTS.md and LF in 任务卡_README.md
+        ag_prefix = (
+            "\ufeff# AGENTS\r\n\r\n> **Scope: line**\r\n\r\n> ⚡ **TL;DR**\r\n"
+            "> - **当前阶段**：初稿（2026-09-15）\r\n> - **下一步**：写 T10b\r\n> - **阻塞**：无\r\n\r\n"
+            "## 3. 现在在哪\r\n- 2026-09-15：初稿完成\r\n\r\n## 3.5 决策登记表\r\n| ID | 决策 |\r\n|---|---|\r\n\r\n"
+            "## 4. 任务看板（前缀保留奇特空白  \t）\r\n<!-- board:start -->\r\n"
+        ).encode("utf-8")
+        ag_suffix = (
+            "<!-- board:end -->\r\n> 尾部说明保留逐字节不动   \r\n"
+            "## 5. 铁律\r\n- **不可混用的维度**：CGCS2000 Albers 250 m。\r\n"
+        ).encode("utf-8")
+        (line / "AGENTS.md").write_bytes(ag_prefix + b"- [ ] old\r\n" + ag_suffix)
+
+        idx_prefix = b"# \xe7\xb4\xa2\xe5\xbc\x95\n\n<!-- cards:start -->\n"
+        idx_suffix = b"<!-- cards:end -->\n\n## \xe5\xb0\xbe\xe6\xb3\xa8\n\xe4\xbf\x9d\xe7\x95\x99\xe4\xb8\x8d\xe5\x8a\xa8\xe3\x80\x82\n"
+        (line / "文档" / "任务卡_README.md").write_bytes(idx_prefix + b"| old |\n" + idx_suffix)
+
+        r_sync1 = run_sb(line)
+        check(r_sync1.returncode == 0, f"sync_board must succeed:\n{r_sync1.stdout}\n{r_sync1.stderr}")
+
+        ag_after1 = (line / "AGENTS.md").read_bytes()
+        idx_after1 = (line / "文档" / "任务卡_README.md").read_bytes()
+        check(ag_after1.startswith(ag_prefix) and ag_after1.endswith(ag_suffix), "AGENTS.md bytes outside board markers must be 100% identical!")
+        check(idx_after1.startswith(idx_prefix) and idx_after1.endswith(idx_suffix), "任务卡_README.md bytes outside cards markers must be 100% identical!")
+
+        # Consecutive 2nd run produces 0 diff
+        r_sync2 = run_sb(line)
+        check(
+            r_sync2.returncode == 0
+            and (line / "AGENTS.md").read_bytes() == ag_after1
+            and (line / "文档" / "任务卡_README.md").read_bytes() == idx_after1,
+            "running sync_board twice must produce identical bytes",
+        )
+
+        # Verify natural order (T1a, T2, T10, T10b), <=30 char truncation, pipe escaping, and checkbox state
+        board_inner = ag_after1[len(ag_prefix) : len(ag_after1) - len(ag_suffix)].decode("utf-8")
+        board_lines = board_inner.split("\r\n")[:-1]
+        check(len(board_lines) == 4, f"expected 4 board lines, got {board_lines}")
+        check(
+            board_lines[0] == "- [x] **T1a 盘点数据源** —— ✅已收口"
+            and board_lines[1] == "- [x] **T2 没有卡号前缀的旧版一级标题** —— ✅已收口"
+            and board_lines[2] == "- [x] **T10 含竖线|和*星号*的任务** —— 🗄️作废"
+            and board_lines[3].startswith("- [ ] **T10b ")
+            and board_lines[3].endswith("…** —— ⏳执行中"),
+            f"unexpected board lines:\n{board_inner}",
+        )
+        t10b_short = board_lines[3].split("**T10b ", 1)[1].split("**", 1)[0]
+        check(len(t10b_short) == 30, f"truncated task name must be 30 chars, got {len(t10b_short)}: {t10b_short!r}")
+
+        cards_inner = idx_after1[len(idx_prefix) : len(idx_after1) - len(idx_suffix)].decode("utf-8")
+        cards_lines = cards_inner.splitlines()
+        check(len(cards_lines) == 6, f"expected header + sep + 4 rows = 6 lines, got {len(cards_lines)}")
+        check("\\|" in cards_lines[4] and "| — |" in cards_lines[4], f"pipe must be escaped and empty dep rendered as —:\n{cards_lines[4]}")
+
+        # --check passes and A007 passes
+        check(run_sb(line, "--check").returncode == 0, "--check must return 0 when synced")
+        rc_ok, out_ok = run(line)
+        check(rc_ok == 0 and "[A007] ✅" in out_ok, f"A007 must pass after sync_board:\n{out_ok}")
+
+        # 4. Mutate 1 card status (⏳执行中 -> 🟡待复核): --check fails (rc=1) and A007 warns; re-running sync_board fixes both
+        t10b_fp = cards_dir / "T10b_配图.md"
+        write(t10b_fp, t10b_fp.read_text(encoding="utf-8").replace("⏳执行中", "🟡待复核"))
+        r_chk_drift = run_sb(line, "--check")
+        check(r_chk_drift.returncode == 1 and "不一致" in r_chk_drift.stdout, f"--check must exit 1 on status change:\n{r_chk_drift.stdout}")
+        rc_drift, out_drift = run(line)
+        check(rc_drift == 0 and "[A007] ⚠️" in out_drift, f"A007 must warn via sync_board when status word changes:\n{out_drift}")
+        check(run_sb(line).returncode == 0 and run_sb(line, "--check").returncode == 0, "re-running sync_board must restore sync")
+
+        # 5. Duplicate card IDs: does not crash, warns on stderr, --check exits 1
+        write(cards_dir / "T1a_重复卡.md", "# T1a 另一张同号卡\n\n## 进度回写\n- 状态：✅已收口\n")
+        r_dup = run_sb(line)
+        check(r_dup.returncode == 0 and "卡号重复" in r_dup.stderr, f"duplicate card IDs must warn without crashing:\n{r_dup.stderr}")
+        check(run_sb(line, "--check").returncode == 1, "--check must exit 1 when duplicate card IDs exist")
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -2958,6 +3120,7 @@ def main(argv: list[str] | None = None) -> int:
 
     test_050_conv1_collab_rules()
     test_050_conv2_card_template_and_a017()
+    test_050_conv3_sync_board()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")
