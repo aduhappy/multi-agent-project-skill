@@ -3538,17 +3538,17 @@ def test_051_conv1_legacy_cards() -> None:
         # Real verbatim legacy card headers from Ningxia watershed project + 1 new-format card (T13f) + 1 unindexed legacy card (T99)
         write(
             cards_dir / "T1a_NAS已有数据盘点.md",
-            "# T1a 盘点 NAS 上已有的 GIS 数据：哪些能直接用于宁夏项目、哪些还得补下载\n\n"
+            "# T1a 盘点 NAS 上已有的 GIS 数据：哪些能直接用于示例项目、哪些还得补下载\n\n"
             "## 进度回写\n- 状态：✅已收口\n- 执行方：略\n",
         )
         write(
             cards_dir / "T1d_GEE取LGRIP30灌溉耕地.md",
-            "# T1d 从 GEE 取 LGRIP30 灌溉/雨养耕地图（宁夏），只用来核对“灌溉补偿区”判定\n\n"
+            "# T1d 从 GEE 取 LGRIP30 灌溉/雨养耕地图（示例区），只用来核对“灌溉补偿区”判定\n\n"
             "## 进度回写\n- 状态：🗄️作废（2026-11-07，用户决定不设灌溉补偿区）\n- 执行方：略\n",
         )
         write(
             cards_dir / "T5c_土壤保持SDR.md",
-            "# T5c 接 T5b：K 按张科利（2007）原文（EPIC 换成国际单位后再修正），K 闸门按原文范围，沿用 T5b 已核实的 R 与梯田输入，跑 InVEST SDR 得土壤保持量\n\n"
+            "# T5c 接 T5b：K 按某文献（2007）原文（EPIC 换成国际单位后再修正），K 闸门按原文范围，沿用 T5b 已核实的 R 与梯田输入，跑 InVEST SDR 得土壤保持量\n\n"
             "## 进度回写\n- 状态：✅已收口\n- 执行方：略\n",
         )
         write(
@@ -3689,11 +3689,11 @@ def test_051_conv2_migrate_card_heads() -> None:
         c_new = cards_dir / "T13f_新格式卡.md"
 
         orig_lf = (
-            "# T1a 盘点 NAS 上已有的 GIS 数据：哪些能直接用于宁夏项目、哪些还得补下载\n\n"
+            "# T1a 盘点 NAS 上已有的 GIS 数据：哪些能直接用于示例项目、哪些还得补下载\n\n"
             "## 进度回写\n- 状态：✅已收口\n- 执行方：略  \n"
         ).encode("utf-8")
         orig_crlf = (
-            "\ufeff# T5c 接 T5b：K 按张科利（2007）原文重算 SDR\r\n\r\n"
+            "\ufeff# T5c 接 T5b：K 按某文献（2007）原文重算 SDR\r\n\r\n"
             "## 进度回写\r\n- 状态：✅已收口\r\n- 执行方：保留CRLF与BOM\r\n"
         ).encode("utf-8")
         orig_unidx = (
