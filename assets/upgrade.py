@@ -80,6 +80,10 @@ _DUP_SEC5_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("坏产物退役隔离", re.compile(r"坏产物退役隔离")),
 )
 
+_SUSPECT_RULES_KEYWORDS: tuple[str, ...] = ("规矩", "规范", "谁改", "纪律", "约定", "铁律", "须知", "守则")
+_LEGACY_RULES_SIGNATURES: tuple[str, ...] = ("谁改卡面哪里", "停止条件分两类", "别让卡越写越大", "复核意见分两节")
+_CN_HEADING_LEVELS: dict[int, str] = {3: "三", 4: "四", 5: "五", 6: "六"}
+
 
 @dataclass(frozen=True)
 class PlannedWrite:
@@ -97,6 +101,8 @@ class IndexTransformResult:
     extracted_old_rules: Optional[bytes]
     changes: list[str]
     cards_status: str  # "added" | "already_marked" | "not_found" | "malformed" | "no_index"
+    rules_status: str = "not_found"  # "migrated" | "already_pointer" | "not_found" | "no_index"
+    suspected_rules_headings: tuple[str, ...] = ()
     wrapped_table_header: str = ""
     wrapped_table_lines: tuple[int, int] = (0, 0)
 
@@ -112,6 +118,8 @@ class UpgradeReport:
     agents_needs_exception_subsec: bool
     index_rel: str = "文档/任务卡_README.md"
     cards_status: str = "no_index"
+    rules_status: str = "no_index"
+    suspected_rules_headings: tuple[str, ...] = ()
     wrapped_table_header: str = ""
     wrapped_table_lines: tuple[int, int] = (0, 0)
 
@@ -180,6 +188,33 @@ def _is_already_rules_pointer(sec_lines: list[str]) -> bool:
     return not any(kw in joined for kw in ("谁改卡面哪里", "别让卡越写越大", "停止条件分两类"))
 
 
+def _collect_suspected_rules_headings(doc: hl.MarkdownDoc, lines: list[str]) -> tuple[str, ...]:
+    """Find H2+ headings suspected to be renamed/demoted rules sections when `## 卡面规矩` is absent."""
+    suspects: list[str] = []
+    seen_starts: set[int] = set()
+    for b in doc.blocks:
+        if b.kind == "heading" and b.level >= 2:
+            if any(kw in b.title for kw in _SUSPECT_RULES_KEYWORDS):
+                seen_starts.add(b.start_line)
+                hashes = "#" * b.level
+                if b.level == 2:
+                    suspects.append(f"`{hashes} {b.title}`（第 {b.start_line + 1} 行）")
+                else:
+                    lvl_cn = _CN_HEADING_LEVELS.get(b.level, str(b.level))
+                    suspects.append(f"`{hashes} {b.title}`（{lvl_cn}级标题，第 {b.start_line + 1} 行）")
+
+    # Fallback: scan H2 sections whose body contains legacy rules signatures even if title lacked keywords
+    h2_blocks = [b for b in doc.blocks if b.kind == "heading" and b.level <= 2]
+    for idx, hb in enumerate(h2_blocks):
+        if hb.level != 2 or hb.start_line in seen_starts:
+            continue
+        sec_end = h2_blocks[idx + 1].start_line if idx + 1 < len(h2_blocks) else len(lines)
+        sec_txt = "\n".join(lines[hb.start_line : sec_end])
+        if any(sig in sec_txt for sig in _LEGACY_RULES_SIGNATURES):
+            suspects.append(f"`## {hb.title}`（第 {hb.start_line + 1} 行，正文含旧规矩内容）")
+    return tuple(suspects)
+
+
 def _group_contiguous_tables(blocks: Sequence[hl.Block], start_ln: int, end_ln: int) -> list[list[hl.Block]]:
     tbl_rows = [
         b for b in blocks if b.kind == "table_row" and start_ln <= b.start_line and b.end_line <= end_ln
@@ -225,7 +260,12 @@ def _transform_index_file(
 
     if rules_start is not None and rules_end is not None:
         sec_slice = lines[rules_start:rules_end]
-        if not _is_already_rules_pointer(sec_slice):
+        if _is_already_rules_pointer(sec_slice):
+            rules_status = "already_pointer"
+            suspected_headings: tuple[str, ...] = ()
+        else:
+            rules_status = "migrated"
+            suspected_headings = ()
             old_trimmed = list(sec_slice)
             while old_trimmed and not old_trimmed[-1].strip():
                 old_trimmed.pop()
@@ -247,6 +287,9 @@ def _transform_index_file(
                 + orig_line_nums[rules_end:]
             )
             changes.append(f"将旧“卡面规矩”节迁出至 {cfg.docs_dir}/_作废/卡面规矩_旧.md 并留指针")
+    else:
+        rules_status = "not_found"
+        suspected_headings = _collect_suspected_rules_headings(doc, lines)
 
     # Step B: Wrap card checklist table (must contain '编号', '任务名', '状态') with <!-- cards:start/end -->
     current_bytes_probe = ("\n".join(lines) + ("\n" if trailing_nl else "")).encode("utf-8")
@@ -329,6 +372,8 @@ def _transform_index_file(
             extracted_old_rules=None,
             changes=[],
             cards_status=cards_status,
+            rules_status=rules_status,
+            suspected_rules_headings=suspected_headings,
             wrapped_table_header=wrapped_hdr,
             wrapped_table_lines=wrapped_span,
         )
@@ -340,6 +385,8 @@ def _transform_index_file(
         extracted_old_rules=extracted_old_rules,
         changes=changes,
         cards_status=cards_status,
+        rules_status=rules_status,
+        suspected_rules_headings=suspected_headings,
         wrapped_table_header=wrapped_hdr,
         wrapped_table_lines=wrapped_span,
     )
@@ -436,6 +483,8 @@ def plan_and_run_upgrade(
     index_fp = root / cfg.index_file
     index_rel = cfg.index_file
     cards_status = "no_index"
+    rules_status = "no_index"
+    suspected_headings: tuple[str, ...] = ()
     wrapped_hdr = ""
     wrapped_span = (0, 0)
     if index_fp.is_file():
@@ -444,6 +493,8 @@ def plan_and_run_upgrade(
         idx_orig = index_fp.read_bytes()
         idx_res = _transform_index_file(idx_orig, cfg)
         cards_status = idx_res.cards_status
+        rules_status = idx_res.rules_status
+        suspected_headings = idx_res.suspected_rules_headings
         wrapped_hdr = idx_res.wrapped_table_header
         wrapped_span = idx_res.wrapped_table_lines
         if idx_res.extracted_old_rules is not None:
@@ -505,6 +556,8 @@ def plan_and_run_upgrade(
         agents_needs_exception_subsec=needs_exc_subsec,
         index_rel=index_rel,
         cards_status=cards_status,
+        rules_status=rules_status,
+        suspected_rules_headings=suspected_headings,
         wrapped_table_header=wrapped_hdr,
         wrapped_table_lines=wrapped_span,
     )
@@ -543,6 +596,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     print(f"=== {mode_str} | 目标：{root} ===")
     print("受保护不写文件：AGENTS.md、STATUS.md、已有任务卡（均未触碰）")
 
+    cfg = hl.load_handoff_config(root)
     if not rep.writes:
         print("文件变更：0 项（已是最新状态，无需改动）。")
     else:
@@ -552,8 +606,37 @@ def main(argv: Optional[list[str]] = None) -> int:
         if rep.applied and rep.backup_dir is not None:
             print(f"升级前备份目录：{rep.backup_dir.relative_to(root).as_posix()}/（共 {len(rep.backed_up_files)} 个文件）")
         elif not rep.applied:
-            cfg = hl.load_handoff_config(root)
             print(f"写盘前将备份原有文件至：{cfg.docs_dir}/_作废/升级前_{cur_day.isoformat()}/")
+
+    rules_sum_map = {
+        "migrated": "已迁出" if rep.applied else "待迁出",
+        "already_pointer": "已完成",
+        "not_found": "未做",
+        "no_index": "无索引",
+    }
+    cards_sum_map = {
+        "added": f"已圈定第 {rep.wrapped_table_lines[0]}–{rep.wrapped_table_lines[1]} 行（表头：{rep.wrapped_table_header}）",
+        "already_marked": "已有标记",
+        "not_found": "未找到卡清单表（需人工加标记）",
+        "malformed": "已有标记但格式有误",
+        "no_index": "无索引",
+    }
+    print(
+        f"汇总：文件变更 {len(rep.writes)} 项｜规矩迁移：{rules_sum_map.get(rep.rules_status, rep.rules_status)}"
+        f"｜卡清单标记：{cards_sum_map.get(rep.cards_status, rep.cards_status)}"
+    )
+
+    if rep.rules_status == "not_found":
+        print(
+            f"\n⚠️ 警告：旧规矩未迁出！在 {rep.index_rel} 中未找到 `## 卡面规矩` 二级标题节（规矩迁移：未做）。"
+        )
+        if rep.suspected_rules_headings:
+            print("  索引中疑似规矩节的标题：" + "、".join(rep.suspected_rules_headings))
+        else:
+            print("  索引中未检出含“规矩 / 规范 / 谁改”等词的疑似标题。")
+        print(
+            f"  请主控人工移走旧规矩节（归档至 {cfg.docs_dir}/_作废/卡面规矩_旧.md），并在原处只留一行指向 `{cfg.docs_dir}/{hl.RULES_FILENAME}` 的指针。"
+        )
 
     if rep.cards_status == "not_found":
         print(

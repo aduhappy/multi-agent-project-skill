@@ -1983,6 +1983,40 @@ def is_cards_table_header(cells: Sequence[str]) -> bool:
     return _match(0, set())
 
 
+def has_legacy_rules_table_in_index(index_text: str) -> bool:
+    """Return True if index_text still contains the legacy '谁改卡面哪里' permission table outside code/comments."""
+    if not index_text or not index_text.strip():
+        return False
+    doc = parse_markdown(index_text)
+    blocks = doc.blocks
+
+    # 1) Explicit '谁改卡面哪里' / '谁改哪里' followed by a table row before the next level<=2 heading
+    for idx, b in enumerate(blocks):
+        vis = b.visible_text(include_code=False)
+        if "谁改卡面哪里" in vis or (b.kind in ("heading", "paragraph") and "谁改哪里" in vis):
+            for nb in blocks[idx:]:
+                if nb is not b and nb.kind == "heading" and nb.level <= 2:
+                    break
+                if nb.kind == "table_row":
+                    return True
+
+    # 2) Any non-cards table header containing both '执行方' and ('复核方' or '主控')
+    for idx, b in enumerate(blocks):
+        if b.kind != "table_row" or b.is_separator:
+            continue
+        if idx + 1 >= len(blocks) or blocks[idx + 1].kind != "table_row" or not blocks[idx + 1].is_separator:
+            continue
+        if is_cards_table_header(b.cells):
+            continue
+        cleaned_cells = [
+            re.sub(r"[*_~`\s]+", "", re.sub(r"<!--.*?-->", "", c, flags=re.S)) for c in b.cells
+        ]
+        joined_hdr = "|".join(cleaned_cells)
+        if "执行方" in joined_hdr and ("复核方" in joined_hdr or "主控" in joined_hdr):
+            return True
+    return False
+
+
 def _cli_main(argv: Optional[list[str]] = None) -> int:
     import argparse
 

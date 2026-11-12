@@ -1027,9 +1027,18 @@ def advisories(
     add("A015", "任务卡目录存在且非空", a015_ok, a015_detail, True)
 
     rules_rel = f"{cfg.docs_dir}/{hl.RULES_FILENAME}"
-    a016_ok, a016_detail = hl.verify_rules_file(
-        root / cfg.docs_dir / hl.RULES_FILENAME, __version__, display_path=rules_rel
-    )
+    rules_fp = root / cfg.docs_dir / hl.RULES_FILENAME
+    a016_ok, a016_detail = hl.verify_rules_file(rules_fp, __version__, display_path=rules_rel)
+    if rules_fp.is_file() and hl.has_legacy_rules_table_in_index(index):
+        residual_msg = (
+            f"{index_disp} 中仍残留旧“谁改卡面哪里”规矩表，请主控人工移至 "
+            f"{cfg.docs_dir}/_作废/卡面规矩_旧.md 并只留一行指向 `{rules_rel}` 的指针"
+        )
+        if a016_ok:
+            a016_ok = False
+            a016_detail = f"{a016_detail}；但 {residual_msg}"
+        else:
+            a016_detail = f"{a016_detail}；且 {residual_msg}"
     add("A016", "协作规矩文件存在、版本匹配且未被改动", a016_ok, a016_detail, True)
 
     a017_issues: list[str] = []

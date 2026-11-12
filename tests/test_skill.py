@@ -3407,6 +3407,92 @@ def test_050_r1_f1_cards_table_header_validation() -> None:
         check(r_empty.returncode == 0 and "| 编号 | 任务名 | 状态 | 依赖 | 文件 |" in idx_fp.read_text(encoding="utf-8"), f"empty markers must populate:\n{r_empty.stderr}")
 
 
+def test_050_r1_f2_missing_rules_warning_and_checker() -> None:
+    """0.5.0 R1-F2: upgrade.py warns loudly when ## 卡面规矩 is missing (Sample E + H3/keyword variants) & A016 warns on residual 谁改卡面哪里 table."""
+    upg_script = ASSETS_DIR / "upgrade.py"
+
+    def run_upg(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(upg_script), str(target), "--skill-dir", str(ASSETS_DIR), "--today", TODAY, *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    # 1. Exact Sample E from review report: `## 卡面规范（主控出卡、改卡时照做）` + `**谁改卡面哪里**` table
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(line / "文档" / "任务卡" / "T1_初稿.md", "# T1 初稿\n> 依赖：无\n\n## 进度回写\n- 状态：✅已收口\n")
+        sample_e_index = (
+            "# 任务卡目录索引\n\n"
+            "## 任务卡清单\n\n"
+            "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n"
+            "|---|---|---|---|---|\n"
+            "| T1 | 初稿 | ✅已收口 | 无 | `任务卡/T1_初稿.md` |\n\n"
+            "## 卡面规范（主控出卡、改卡时照做）\n\n"
+            "**谁改卡面哪里**\n\n"
+            "| 位置 | 执行方 | 复核方 | 主控 |\n"
+            "|:--|:--|:--|:--|\n"
+            "| 卡面“进度回写” | 自己那一行 | 自己那一行 | 主控行 |\n"
+        )
+        write(line / "文档" / "任务卡_README.md", sample_e_index)
+
+        r_prev = run_upg(line)
+        r_app = run_upg(line, "--apply")
+        for mode_lbl, r_out in (("preview", r_prev.stdout), ("apply", r_app.stdout)):
+            check(
+                "旧规矩未迁出" in r_out
+                and "## 卡面规范（主控出卡、改卡时照做）" in r_out
+                and "请主控人工移走" in r_out
+                and "规矩迁移：未做" in r_out,
+                f"F2 Sample E ({mode_lbl}) must warn '旧规矩未迁出', list '## 卡面规范...', instruct manual move, and show '规矩迁移：未做':\n{r_out}",
+            )
+
+        # After --apply, 协作规矩.md exists AND 任务卡_README.md still has 谁改卡面哪里 table -> A016 warns!
+        rc_chk, out_chk = run(line)
+        check(
+            rc_chk == 0 and "[A016] ⚠️" in out_chk and "谁改卡面哪里" in out_chk,
+            f"F2 checker must warn in A016 when 协作规矩.md exists and index still has 谁改卡面哪里 table:\n{out_chk}",
+        )
+
+    # 2. Variant F2-a: Level-3 heading `### 卡面规矩（主控出卡、改卡时照做）` + Variant F2-b: `## 谁改哪里与协作约定`
+    for var_heading, expect_sub in (
+        ("### 卡面规矩（主控出卡、改卡时照做）", "三级标题"),
+        ("## 谁改哪里与协作约定", "## 谁改哪里与协作约定"),
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            line = build(Path(temp))
+            write(line / "文档" / "任务卡" / "T1_初稿.md", "# T1 初稿\n\n## 进度回写\n- 状态：✅已收口\n")
+            var_idx = (
+                "# 索引\n\n## 任务卡清单\n"
+                "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n|---|---|---|---|---|\n| T1 | 初稿 | ✅已收口 | 无 | `任务卡/T1_初稿.md` |\n\n"
+                f"{var_heading}\n\n**谁改卡面哪里**\n\n| 位置 | 执行方 | 复核方 |\n|---|---|---|\n| 进度回写 | 改 | 改 |\n"
+            )
+            write(line / "文档" / "任务卡_README.md", var_idx)
+            r_var = run_upg(line, "--apply")
+            check(
+                "旧规矩未迁出" in r_var.stdout
+                and var_heading in r_var.stdout
+                and expect_sub in r_var.stdout
+                and "规矩迁移：未做" in r_var.stdout,
+                f"F2 variant {var_heading!r} must be listed in warning:\n{r_var.stdout}",
+            )
+            rc_v, out_v = run(line)
+            check(rc_v == 0 and "[A016] ⚠️" in out_v and "谁改卡面哪里" in out_v, f"F2 variant A016 must warn:\n{out_v}")
+
+    # 3. Clean 0.5.0 index (pointer only, no table) -> NO F2 warning and A016 passes
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(line / "文档" / "协作规矩.md", (ASSETS_DIR / "协作规矩.md").read_text(encoding="utf-8"))
+        write(line / "文档" / "任务卡_README.md", (ASSETS_DIR / "任务卡_README.md").read_text(encoding="utf-8"))
+        write(line / "文档" / "任务卡" / "T1_初稿.md", "# T1 初稿\n\n## 进度回写\n- 状态：✅已收口\n")
+        r_clean = run_upg(line)
+        check(
+            "旧规矩未迁出" not in r_clean.stdout and "规矩迁移：已完成" in r_clean.stdout,
+            f"clean 0.5.0 index must NOT trigger F2 warning:\n{r_clean.stdout}",
+        )
+        rc_clean, out_clean = run(line)
+        check(rc_clean == 0 and "[A016] ✅" in out_clean, f"clean 0.5.0 index must pass A016:\n{out_clean}")
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -3602,6 +3688,7 @@ def main(argv: list[str] | None = None) -> int:
     test_050_conv5_upgrade()
     test_050_conv6_extras_and_t13d()
     test_050_r1_f1_cards_table_header_validation()
+    test_050_r1_f2_missing_rules_warning_and_checker()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")
