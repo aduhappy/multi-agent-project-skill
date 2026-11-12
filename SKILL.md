@@ -26,7 +26,7 @@ description: 初始化或重构"跨 agent、跨软件可续接"的项目文档�
 0. **预置决策登记表**：在线级 `AGENTS.md` §3.5 预置空表（模板已带），建模/取数前先 grep 此表。
 1. **先读后问**：先读项目已有 README、目录、文档与代码；能推断的给默认值并标“默认值，可改”，一次性问用户特有且无法推断的信息（项目根、是否多线、一句话目标、兼容工具、是否云同步盘、数据源）。
 2. **问清“不可混用的维度”**：把本领域绝不能混用的口径/单位/坐标系/分辨率/时期写成 §5 硬规则。
-3. **建入口**：**单线项目**拷 `assets/AGENTS.md`；**多线项目**拷 `assets/ROOT_AGENTS.md` 作根索引，并为每条线拷 `assets/AGENTS.md`（冷启动与四条规矩见 [`references/multi_line.md`](references/multi_line.md)）。未知项留 `【待填】`，已知项直接填入。
+3. **建入口**：**单线项目**拷 `assets/AGENTS.md`；**多线项目**拷 `assets/ROOT_AGENTS.md` 作根索引，并为每条线拷 `assets/AGENTS.md`（冷启动与四条规矩见 [`references/multi_line.md`](references/multi_line.md)）。未知项留 `【待填】`，已知项直接填入（填完前检查器 A014 有【待填】提示属正常）。
 4. **复制薄指针**：按勾选工具复制 `assets/CLAUDE.md`、`assets/GEMINI.md`、`assets/multi-agent.mdc` → `.cursor/rules/multi-agent.mdc` 或 `assets/copilot-instructions.md` → `.github/copilot-instructions.md`，统一指向当前 scope 根 `AGENTS.md`（子目录配置仍指向上级 scope 根）。未勾选不生成。
 5. **建规矩、任务卡与索引**：拷 `assets/协作规矩.md` → `文档/协作规矩.md`（唯一出处，项目不改；例外写 `AGENTS.md` §5“本项目例外”）、`assets/任务卡_README.md` → `文档/任务卡_README.md`，照 `assets/任务卡_模板.md` 建 `文档/任务卡/T1_<主题>.md`（一个任务一张卡，执行与独立复核同卡双提示词）。多树/迁移另拷 `assets/迁移协议.md`、`assets/经验教训.md`。
 6. **权威层与可选专题文件**：拷 `assets/关键数字.md` → `文档/关键数字.md`（与 §3.5 决策表同为权威层）、`assets/对外名称对照.md` → `文档/对外名称对照.md`；按需拷 `assets/环境坑.md` → `文档/环境坑.md`，或建 `文档/决策记录/`、`文档/词汇表.md`（见 [`references/advanced.md`](references/advanced.md)）。

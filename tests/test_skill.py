@@ -3493,6 +3493,35 @@ def test_050_r1_f2_missing_rules_warning_and_checker() -> None:
         check(rc_clean == 0 and "[A016] ✅" in out_clean, f"clean 0.5.0 index must pass A016:\n{out_clean}")
 
 
+def test_050_r1_suggestions_1_to_7() -> None:
+    """0.5.0 R1 Suggestions 1–7: template prompts, 协作规矩.md wording & hash, upgrade checklist note, SKILL.md Mode A note."""
+    tpl_txt = (ASSETS_DIR / "任务卡_模板.md").read_text(encoding="utf-8")
+    prompts = list(re.finditer(r"````text\n(.*?)\n````", tpl_txt, re.S))
+    check(len(prompts) == 2, f"expected 2 prompts in 任务卡_模板.md, got {len(prompts)}")
+    exec_p, rev_p = prompts[0].group(1), prompts[1].group(1)
+
+    # Suggestions 1, 2, 3
+    check("卡面标 🔒 的不得改动" in exec_p, f"Suggestion 1 missing in executor prompt:\n{exec_p}")
+    check("【写明用哪个不同的来源或方法】" in rev_p, f"Suggestion 2 missing in reviewer prompt:\n{rev_p}")
+    check("用几句大白话告诉我" in exec_p and "用几句大白话告诉我" in rev_p, "Suggestion 3 missing in dispatch prompts")
+
+    # Suggestions 4, 5 + SHA-256 header match
+    rules_txt = (ASSETS_DIR / "协作规矩.md").read_text(encoding="utf-8")
+    check("其他项目删掉" in rules_txt, "Suggestion 4 ('其他项目删掉') missing in 协作规矩.md")
+    check("任务卡文件名不得含“复核”" in rules_txt, "Suggestion 5 ('任务卡文件名不得含“复核”') missing in 协作规矩.md")
+    ok_sha, msg_sha = hl_mod.verify_rules_file(ASSETS_DIR / "协作规矩.md", "0.5.0")
+    check(ok_sha, f"协作规矩.md SHA-256 header invalid after R1 edits: {msg_sha}")
+
+    # Suggestion 6
+    upg_txt = (ASSETS_DIR / "upgrade.py").read_text(encoding="utf-8")
+    check("措辞相近的重复条目请主控自查" in upg_txt, "Suggestion 6 missing in upgrade.py checklist")
+
+    # Suggestion 7
+    skill_txt = (REPO / "SKILL.md").read_text(encoding="utf-8")
+    mode_a_sec = skill_txt.split("### 模式 A", 1)[1].split("### 模式 B", 1)[0]
+    check("填完前" in mode_a_sec and "有【待填】提示属正常" in mode_a_sec, f"Suggestion 7 missing in SKILL.md Mode A:\n{mode_a_sec}")
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -3689,6 +3718,7 @@ def main(argv: list[str] | None = None) -> int:
     test_050_conv6_extras_and_t13d()
     test_050_r1_f1_cards_table_header_validation()
     test_050_r1_f2_missing_rules_warning_and_checker()
+    test_050_r1_suggestions_1_to_7()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")

@@ -668,6 +668,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("     <!-- board:end -->")
     else:
         print("3. §4 已含 `<!-- board:start --> … <!-- board:end -->` 标记，可直接运行 `python scripts/sync_board.py`。")
+    print("注：第 1 条仅按字面短语匹配，§5 中措辞相近的重复条目请主控自查。")
     return 0
 
 
