@@ -2978,6 +2978,131 @@ def test_050_conv4_agents_template() -> None:
     )
 
 
+def test_050_conv5_upgrade() -> None:
+    """0.5.0 Convention 5: upgrade.py preview/--apply, backup, 4 actions, SHA-256 invariance of AGENTS/STATUS/cards, idempotence & crash recovery."""
+    import hashlib
+
+    upg_script = ASSETS_DIR / "upgrade.py"
+    check(upg_script.is_file(), "assets/upgrade.py must exist")
+    skill_md = (REPO / "SKILL.md").read_text(encoding="utf-8")
+    check("模式 C" in skill_md and "upgrade.py" in skill_md, "SKILL.md must document 模式 C and upgrade.py")
+    check(len((REPO / "SKILL.md").read_bytes()) <= 15_000, "SKILL.md must stay <= 15 KB")
+
+    def sha256_file(p: Path) -> str:
+        return hashlib.sha256(p.read_bytes()).hexdigest()
+
+    def run_upg(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(upg_script), str(target), "--skill-dir", str(ASSETS_DIR), "--today", TODAY, *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        # Populate an old-layout (0.4.x) project with universal §5 items, old 任务卡_README.md (2 tables!), old scripts, and 2 task cards
+        old_agents = (
+            (line / "AGENTS.md").read_text(encoding="utf-8")
+            + "\n## 5. 铁律 / 约定\n"
+            + "- **不可混用的维度**：CGCS2000 Albers 250 m。\n"
+            + "- **代码归位**：脚本进 `scripts/`。\n"
+            + "- **收工规矩**：收工跑 check_handoff.py。\n"
+            + "- **独立复核分级阀门**：分析建模必须独立复核。\n"
+            + "- **坏产物退役隔离**：错产物移入 `_作废/`。\n"
+        )
+        write(line / "AGENTS.md", old_agents)
+        old_rules_sec = (
+            "## 卡面规矩（所有卡共用，单卡内不重复）\n\n"
+            "**谁改卡面哪里**：\n\n"
+            "| 角色 | 可写 |\n|---|---|\n| 执行方 | 进度回写 |\n\n"
+            "**停止条件分两类**：遇到实质错停下问。\n"
+        )
+        old_index = (
+            "# 任务卡索引\n\n"
+            "## 任务卡清单\n\n"
+            "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n"
+            "|---|---|---|---|---|\n"
+            "| T1 | 初稿 | ✅已收口 | — | `任务卡/T1_初稿.md` |\n"
+            "| T2 | 方法 | ⬜可派 | T1 | `任务卡/T2_方法.md` |\n\n"
+            + old_rules_sec
+        )
+        write(line / "文档" / "任务卡_README.md", old_index)
+        write(line / "文档" / "任务卡" / "T1_初稿.md", "# T1 初稿\n\n## 进度回写\n- 状态：✅已收口\n- 执行方：略\n")
+        write(
+            line / "文档" / "任务卡" / "T2_方法.md",
+            "# T2 方法\n\n## 进度回写\n- 状态：⬜可派\n\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n",
+        )
+        old_check_bytes = b"# old check_handoff v0.4.2 stub\n"
+        (line / "scripts").mkdir(parents=True, exist_ok=True)
+        (line / "scripts" / "check_handoff.py").write_bytes(old_check_bytes)
+        write(line / "scripts" / "my_analysis.py", "X = 1\n")
+
+        protected_paths = [
+            line / "AGENTS.md",
+            line / "STATUS.md",
+            line / "文档" / "任务卡" / "T1_初稿.md",
+            line / "文档" / "任务卡" / "T2_方法.md",
+            line / "scripts" / "my_analysis.py",
+        ]
+        hashes_before = {p: sha256_file(p) for p in protected_paths}
+        idx_hash_before = sha256_file(line / "文档" / "任务卡_README.md")
+
+        # 1. Default dry-run: writes nothing, prints checklist
+        r_prev = run_upg(line)
+        check(r_prev.returncode == 0 and "升级预览" in r_prev.stdout, f"preview must succeed:\n{r_prev.stdout}\n{r_prev.stderr}")
+        check(
+            "代码归位" in r_prev.stdout and "独立复核分级阀门" in r_prev.stdout and "board:start" in r_prev.stdout,
+            f"preview must print AGENTS.md §5 duplicate items and §4 board marker hint:\n{r_prev.stdout}",
+        )
+        check(not (line / "文档" / "协作规矩.md").exists(), "preview must not create 协作规矩.md")
+        check(sha256_file(line / "文档" / "任务卡_README.md") == idx_hash_before, "preview must not modify 任务卡_README.md")
+        check({p: sha256_file(p) for p in protected_paths} == hashes_before, "preview must not touch protected files")
+
+        # 2. --apply: performs 4 actions + backup, leaves protected files byte-for-byte identical
+        r_app1 = run_upg(line, "--apply")
+        check(r_app1.returncode == 0 and "已执行升级" in r_app1.stdout, f"--apply must succeed:\n{r_app1.stdout}\n{r_app1.stderr}")
+        check({p: sha256_file(p) for p in protected_paths} == hashes_before, "--apply MUST NOT touch AGENTS.md, STATUS.md, cards, or user scripts!")
+
+        # Check backups exist and match pre-upgrade bytes
+        bdir = line / "文档" / "_作废" / f"升级前_{TODAY}"
+        check((bdir / "scripts" / "check_handoff.py").read_bytes() == old_check_bytes, "backup of check_handoff.py must match pre-upgrade bytes")
+        check(sha256_file(bdir / "文档" / "任务卡_README.md") == idx_hash_before, "backup of 任务卡_README.md must match pre-upgrade SHA-256")
+
+        # Check 4 actions
+        for sname in ("handoff_lib.py", "check_handoff.py", "archive_status.py", "sync_board.py", "upgrade.py"):
+            check((line / "scripts" / sname).read_bytes() == (ASSETS_DIR / sname).read_bytes(), f"scripts/{sname} must match assets/{sname}")
+        check((line / "文档" / "协作规矩.md").read_bytes() == (ASSETS_DIR / "协作规矩.md").read_bytes(), "文档/协作规矩.md must match assets")
+        old_archived = (line / "文档" / "_作废" / "卡面规矩_旧.md").read_text(encoding="utf-8")
+        check("谁改卡面哪里" in old_archived and "停止条件分两类" in old_archived, f"old 卡面规矩 must be preserved verbatim:\n{old_archived}")
+        new_idx = (line / "文档" / "任务卡_README.md").read_text(encoding="utf-8")
+        check(
+            "<!-- cards:start -->" in new_idx
+            and "<!-- cards:end -->" in new_idx
+            and "文档/协作规矩.md" in new_idx
+            and "谁改卡面哪里" not in new_idx,
+            f"upgraded 任务卡_README.md must have cards markers and pointer without old rules body:\n{new_idx}",
+        )
+
+        # Checker passes with 0 FAILs
+        rc_chk, out_chk = run(line)
+        check(rc_chk == 0 and "[A016] ✅" in out_chk, f"upgraded project must have 0 FAILs and pass A016:\n{out_chk}")
+
+        # 3. Consecutive 2nd and 3rd runs: 0 changes
+        snapshot_after1 = {p.relative_to(line).as_posix(): sha256_file(p) for p in line.rglob("*") if p.is_file()}
+        for run_no in (2, 3):
+            r_again = run_upg(line, "--apply")
+            check(r_again.returncode == 0 and "0 项" in r_again.stdout, f"run #{run_no} must report 0 changes:\n{r_again.stdout}")
+            snapshot_now = {p.relative_to(line).as_posix(): sha256_file(p) for p in line.rglob("*") if p.is_file()}
+            check(snapshot_now == snapshot_after1, f"run #{run_no} must leave every file hash unchanged")
+
+        # 4. Simulated mid-run interruption: revert 任务卡_README.md to pre-upgrade & delete 协作规矩.md while keeping 卡面规矩_旧.md & backup
+        write(line / "文档" / "任务卡_README.md", old_index)
+        (line / "文档" / "协作规矩.md").unlink()
+        r_recover = run_upg(line, "--apply")
+        check(r_recover.returncode == 0, f"recovery --apply must succeed:\n{r_recover.stdout}\n{r_recover.stderr}")
+        snapshot_recovered = {p.relative_to(line).as_posix(): sha256_file(p) for p in line.rglob("*") if p.is_file()}
+        check(snapshot_recovered == snapshot_after1, "recovery --apply after partial state must converge to identical hashes and preserve initial backup")
+
+
 def main(argv: list[str] | None = None) -> int:
     global _DUMP_DIR
     parser = argparse.ArgumentParser(description="Run multi-agent-project skill self-tests")
@@ -3170,6 +3295,7 @@ def main(argv: list[str] | None = None) -> int:
     test_050_conv2_card_template_and_a017()
     test_050_conv3_sync_board()
     test_050_conv4_agents_template()
+    test_050_conv5_upgrade()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")

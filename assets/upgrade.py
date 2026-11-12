@@ -1,0 +1,496 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""upgrade.py — 将已有 multi-agent-project 项目骨架升级到当前版本（默认仅预览，绝不动入口/任务卡/STATUS）
+
+用法：
+    python <skill>/assets/upgrade.py [PATH]              # 默认只预览（同 --dry-run），不写盘
+    python <skill>/assets/upgrade.py [PATH] --apply      # 执行升级（写盘前自动备份到 文档/_作废/升级前_<日期>/）
+    python scripts/upgrade.py [PATH] --skill-dir DIR     # 从项目内调用时可显式指定技能仓库或 assets 目录
+    python scripts/upgrade.py --version                  # 查看脚本版本号
+
+四项自动操作（仅 --apply 时写盘）：
+  1. 替换 `scripts/` 下的技能配套脚本（handoff_lib.py、check_handoff.py、archive_status.py、sync_board.py、upgrade.py 等）
+  2. 写入新版 `<docs_dir>/协作规矩.md`
+  3. 将任务卡索引里旧的“## 卡面规矩”整节原样移存至 `<docs_dir>/_作废/卡面规矩_旧.md`，原处仅留一行指针
+  4. 在任务卡索引的卡清单表上下加上 `<!-- cards:start -->` 与 `<!-- cards:end -->` 标记
+
+硬性边界：
+  - **任何情况下绝不写入** `AGENTS.md`、已有任务卡（`<cards_dir>/*.md`）、`STATUS.md`。
+  - `AGENTS.md` 需手工调整处仅打印核对清单（§5 与规矩文件重复可删的条目、§4 如何添加看板标记）。
+  - 幂等可重入：重复运行或中途中断后重跑不会重复修改，已是最新布局的项目运行无任何改动。
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import sys
+import tempfile
+from dataclasses import dataclass
+from datetime import date, datetime
+from pathlib import Path
+from typing import Optional
+
+sys.dont_write_bytecode = True
+
+__version__ = "0.4.2"
+
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+try:
+    import handoff_lib as hl
+except ImportError as _exc:
+    if getattr(_exc, "name", None) in (None, "handoff_lib"):
+        print("错误：未找到 handoff_lib.py，请把 handoff_lib.py 一起复制到同一目录。", file=sys.stderr)
+        raise SystemExit(2)
+    raise
+
+try:
+    import sync_board as sb
+except ImportError as _sb_exc:
+    if getattr(_sb_exc, "name", None) in (None, "sync_board"):
+        sb = None  # type: ignore[assignment]
+    else:
+        raise
+
+
+_SKILL_SCRIPT_NAMES: tuple[str, ...] = (
+    "handoff_lib.py",
+    "check_handoff.py",
+    "archive_status.py",
+    "sync_board.py",
+    "upgrade.py",
+    "fingerprint.py",
+)
+
+_DUP_SEC5_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("代码归位", re.compile(r"代码归位")),
+    ("收工规矩", re.compile(r"收工规矩")),
+    ("独立复核分级阀门", re.compile(r"独立复核分级阀门")),
+    ("开跑先自证身份", re.compile(r"开跑先自证身份")),
+    ("关键测量双源交叉", re.compile(r"关键测量双源交叉")),
+    ("关键数字单一来源", re.compile(r"关键数字单一来源")),
+    ("坏产物退役隔离", re.compile(r"坏产物退役隔离")),
+)
+
+
+@dataclass(frozen=True)
+class PlannedWrite:
+    rel_path: str
+    abs_path: Path
+    new_bytes: bytes
+    existed: bool
+    summary: str
+    backup_needed: bool = True
+
+
+@dataclass(frozen=True)
+class UpgradeReport:
+    applied: bool
+    writes: list[PlannedWrite]
+    backup_dir: Optional[Path]
+    backed_up_files: list[str]
+    agents_dup_items: list[str]
+    agents_needs_board_markers: bool
+    agents_needs_exception_subsec: bool
+
+
+def resolve_skill_assets(explicit_skill_dir: Optional[str] = None) -> Path:
+    candidates: list[Path] = []
+    if explicit_skill_dir:
+        p = Path(explicit_skill_dir).expanduser().resolve()
+        candidates.extend([p, p / "assets"])
+    candidates.extend([_HERE, _HERE.parent / "assets"])
+    home = Path.home()
+    for sub in (
+        ".mirasim/skills/multi-agent-project/assets",
+        ".agents/skills/multi-agent-project/assets",
+        ".claude/skills/multi-agent-project/assets",
+        ".gemini/skills/multi-agent-project/assets",
+        ".codex/skills/multi-agent-project/assets",
+    ):
+        candidates.append((home / sub).resolve())
+
+    for cand in candidates:
+        if (cand / hl.RULES_FILENAME).is_file() and (cand / "check_handoff.py").is_file():
+            return cand
+    raise FileNotFoundError(
+        "未定位到技能仓库的 assets/ 目录（需含 协作规矩.md 与 check_handoff.py）；请通过 --skill-dir 指定技能目录。"
+    )
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _assert_never_protected(target: Path, root: Path, cfg: hl.HandoffConfig) -> None:
+    resolved = target.resolve()
+    agents_p = (root / "AGENTS.md").resolve()
+    status_p = (root / "STATUS.md").resolve()
+    cards_dir_p = (root / cfg.cards_dir).resolve()
+    if resolved == agents_p or resolved == status_p:
+        raise RuntimeError(f"安全拦截：upgrade.py 严禁写入受保护文件 {resolved}")
+    try:
+        resolved.relative_to(cards_dir_p)
+    except ValueError:
+        pass
+    else:
+        raise RuntimeError(f"安全拦截：upgrade.py 严禁写入任务卡目录内文件 {resolved}")
+
+
+def _is_already_rules_pointer(sec_lines: list[str]) -> bool:
+    body_non_empty = [ln.strip() for ln in sec_lines[1:] if ln.strip()]
+    if not body_non_empty or len(body_non_empty) > 3:
+        return False
+    joined = "\n".join(body_non_empty)
+    if "协作规矩.md" not in joined:
+        return False
+    return not any(kw in joined for kw in ("谁改卡面哪里", "别让卡越写越大", "停止条件分两类"))
+
+
+def _transform_index_file(
+    raw_bytes: bytes,
+    cfg: hl.HandoffConfig,
+) -> tuple[bytes, Optional[bytes], list[str]]:
+    """Return (new_index_bytes, extracted_old_rules_bytes_or_None, change_descriptions)."""
+    eol_str = hl.detect_eol(raw_bytes)
+    has_bom = raw_bytes.startswith(b"\xef\xbb\xbf")
+    text = raw_bytes.decode("utf-8-sig")
+    norm = text.replace("\r\n", "\n").replace("\r", "\n")
+    trailing_nl = norm.endswith("\n")
+    lines = norm.splitlines()
+    changes: list[str] = []
+    extracted_old_rules: Optional[bytes] = None
+
+    # Step A: Move old `## 卡面规矩` section to 卡面规矩_旧.md and leave 1-line pointer
+    doc = hl.parse_markdown("\n".join(lines), strip_comments=False)
+    rules_start: Optional[int] = None
+    rules_end: Optional[int] = None
+    for b in doc.blocks:
+        if b.kind == "heading" and b.level == 2:
+            if rules_start is None:
+                if b.title.startswith("卡面规矩"):
+                    rules_start = b.start_line
+            else:
+                rules_end = b.start_line
+                break
+    if rules_start is not None and rules_end is None:
+        rules_end = len(lines)
+
+    if rules_start is not None and rules_end is not None:
+        sec_slice = lines[rules_start:rules_end]
+        if not _is_already_rules_pointer(sec_slice):
+            old_trimmed = list(sec_slice)
+            while old_trimmed and not old_trimmed[-1].strip():
+                old_trimmed.pop()
+            extracted_old_rules = (eol_str.join(old_trimmed) + eol_str).encode("utf-8")
+            heading_ln = sec_slice[0]
+            pointer_ln = (
+                f"> 卡面规矩、通用铁律与各角色须知已迁入 `{cfg.docs_dir}/{hl.RULES_FILENAME}`"
+                f"（唯一出处，项目不改它；旧版原文存档于 `{cfg.docs_dir}/_作废/卡面规矩_旧.md`）。"
+            )
+            replacement = [heading_ln, "", pointer_ln]
+            if rules_end < len(lines):
+                replacement.append("")
+            lines = lines[:rules_start] + replacement + lines[rules_end:]
+            changes.append(f"将旧“卡面规矩”节迁出至 {cfg.docs_dir}/_作废/卡面规矩_旧.md 并留指针")
+
+    # Step B: Wrap card checklist table with <!-- cards:start --> ... <!-- cards:end --> if not already marked
+    current_bytes_probe = ("\n".join(lines) + ("\n" if trailing_nl else "")).encode("utf-8")
+    already_marked = False
+    if sb is not None:
+        already_marked = sb.find_marker_span_bytes(current_bytes_probe, "cards").state != "missing"
+    else:
+        already_marked = bool(re.search(r"<!--\s*cards:(?:start|end)\s*-->", "\n".join(lines)))
+
+    if not already_marked:
+        doc2 = hl.parse_markdown("\n".join(lines), strip_comments=False)
+        # Prefer table inside `## 任务卡清单...`; fallback to first table before `## 卡面规矩`
+        sec_start = 0
+        sec_end = len(lines)
+        found_list_sec = False
+        for b in doc2.blocks:
+            if b.kind == "heading" and b.level == 2:
+                if not found_list_sec and ("任务卡清单" in b.title or "卡清单" in b.title):
+                    found_list_sec = True
+                    sec_start = b.start_line
+                elif found_list_sec:
+                    sec_end = b.start_line
+                    break
+        if not found_list_sec:
+            for b in doc2.blocks:
+                if b.kind == "heading" and b.level == 2 and b.title.startswith("卡面规矩"):
+                    sec_end = b.start_line
+                    break
+
+        tbl_blocks = [
+            b for b in doc2.blocks
+            if b.kind == "table_row" and sec_start <= b.start_line and b.end_line <= sec_end
+        ]
+        if tbl_blocks:
+            first_tbl_ln = tbl_blocks[0].start_line
+            # Contiguous table rows starting at first_tbl_ln
+            last_tbl_ln = tbl_blocks[0].end_line
+            for tb in tbl_blocks[1:]:
+                if tb.start_line == last_tbl_ln:
+                    last_tbl_ln = tb.end_line
+                else:
+                    break
+            lines = (
+                lines[:first_tbl_ln]
+                + ["<!-- cards:start -->"]
+                + lines[first_tbl_ln:last_tbl_ln]
+                + ["<!-- cards:end -->"]
+                + lines[last_tbl_ln:]
+            )
+            changes.append("在任务卡清单表上下添加 <!-- cards:start --> 与 <!-- cards:end --> 标记")
+
+    if not changes:
+        return raw_bytes, None, []
+
+    rebuilt = eol_str.join(lines) + (eol_str if trailing_nl else "")
+    out_bytes = (b"\xef\xbb\xbf" if has_bom else b"") + rebuilt.encode("utf-8")
+    return out_bytes, extracted_old_rules, changes
+
+
+def inspect_agents_readonly(root: Path) -> tuple[list[str], bool, bool]:
+    """Read AGENTS.md without modifying it; return (dup_sec5_items, needs_board_markers, needs_exception_subsec)."""
+    ag_fp = root / "AGENTS.md"
+    if not ag_fp.is_file():
+        return [], True, True
+    raw = ag_fp.read_bytes()
+    txt = hl.read_utf8(ag_fp)
+    doc = hl.parse_markdown(txt, strip_comments=False)
+
+    sec5_blocks = hl.extract_section_blocks(doc, "5", {"铁律 / 约定", "铁律/约定", "铁律"})
+    dup_items: list[str] = []
+    has_exc_subsec = False
+    for b in sec5_blocks[1:]:
+        vis = b.visible_text(include_code=True)
+        if "本项目例外" in vis:
+            has_exc_subsec = True
+        if b.kind == "list_item" and b.indent == 0:
+            first_ln = b.visible_lines(include_code=True)[0] if b.visible_lines(include_code=True) else ""
+            for label, pat in _DUP_SEC5_PATTERNS:
+                if pat.search(first_ln) and label not in dup_items:
+                    dup_items.append(label)
+
+    if sb is not None:
+        needs_markers = sb.find_marker_span_bytes(raw, "board").state == "missing"
+    else:
+        needs_markers = not bool(re.search(r"<!--\s*board:start\s*-->", txt))
+    return dup_items, needs_markers, not has_exc_subsec
+
+
+def plan_and_run_upgrade(
+    root: Path,
+    *,
+    apply: bool = False,
+    skill_assets: Optional[Path] = None,
+    today: Optional[date] = None,
+) -> UpgradeReport:
+    cfg = hl.load_handoff_config(root)
+    for w in cfg.warnings:
+        print(f"提示：{w}", file=sys.stderr)
+
+    assets_dir = skill_assets if skill_assets is not None else resolve_skill_assets()
+    cur_day = today or datetime.now().date()
+    planned: list[PlannedWrite] = []
+
+    # 1. Scripts in scripts/
+    scripts_dir = root / "scripts"
+    for fn in _SKILL_SCRIPT_NAMES:
+        src_fp = assets_dir / fn
+        if not src_fp.is_file():
+            continue
+        dst_fp = scripts_dir / fn
+        _assert_never_protected(dst_fp, root, cfg)
+        src_bytes = src_fp.read_bytes()
+        existed = dst_fp.is_file()
+        if existed and dst_fp.read_bytes() == src_bytes:
+            continue
+        rel = dst_fp.relative_to(root).as_posix()
+        planned.append(
+            PlannedWrite(
+                rel_path=rel,
+                abs_path=dst_fp,
+                new_bytes=src_bytes,
+                existed=existed,
+                summary=("更新脚本 " if existed else "新增脚本 ") + rel,
+                backup_needed=existed,
+            )
+        )
+
+    # 2. <docs_dir>/协作规矩.md
+    rules_src = assets_dir / hl.RULES_FILENAME
+    rules_dst = root / cfg.docs_dir / hl.RULES_FILENAME
+    _assert_never_protected(rules_dst, root, cfg)
+    rules_bytes = rules_src.read_bytes()
+    rules_existed = rules_dst.is_file()
+    if not rules_existed or rules_dst.read_bytes() != rules_bytes:
+        rel = rules_dst.relative_to(root).as_posix()
+        planned.append(
+            PlannedWrite(
+                rel_path=rel,
+                abs_path=rules_dst,
+                new_bytes=rules_bytes,
+                existed=rules_existed,
+                summary=("更新规矩文件 " if rules_existed else "新增规矩文件 ") + rel,
+                backup_needed=rules_existed,
+            )
+        )
+
+    # 3 & 4. <index_file>: move old ## 卡面规矩 to <docs_dir>/_作废/卡面规矩_旧.md + add cards markers
+    index_fp = root / cfg.index_file
+    if index_fp.is_file():
+        _assert_never_protected(index_fp, root, cfg)
+        idx_orig = index_fp.read_bytes()
+        idx_new, old_rules_bytes, idx_changes = _transform_index_file(idx_orig, cfg)
+        if old_rules_bytes is not None:
+            archive_old_fp = root / cfg.docs_dir / "_作废" / "卡面规矩_旧.md"
+            _assert_never_protected(archive_old_fp, root, cfg)
+            old_existed = archive_old_fp.is_file()
+            if not old_existed or archive_old_fp.read_bytes() != old_rules_bytes:
+                rel_old = archive_old_fp.relative_to(root).as_posix()
+                planned.append(
+                    PlannedWrite(
+                        rel_path=rel_old,
+                        abs_path=archive_old_fp,
+                        new_bytes=old_rules_bytes,
+                        existed=old_existed,
+                        summary=f"归档旧卡面规矩至 {rel_old}",
+                        backup_needed=old_existed,
+                    )
+                )
+        if idx_new != idx_orig:
+            rel_idx = index_fp.relative_to(root).as_posix()
+            planned.append(
+                PlannedWrite(
+                    rel_path=rel_idx,
+                    abs_path=index_fp,
+                    new_bytes=idx_new,
+                    existed=True,
+                    summary=f"修改 {rel_idx}（{'；'.join(idx_changes)}）",
+                    backup_needed=True,
+                )
+            )
+
+    dup_items, needs_board_markers, needs_exc_subsec = inspect_agents_readonly(root)
+
+    backup_dir: Optional[Path] = None
+    backed_up: list[str] = []
+    if apply and planned:
+        existing_to_backup = [pw for pw in planned if pw.existed and pw.backup_needed]
+        if existing_to_backup:
+            backup_dir = root / cfg.docs_dir / "_作废" / f"升级前_{cur_day.isoformat()}"
+            _assert_never_protected(backup_dir, root, cfg)
+            for pw in existing_to_backup:
+                b_dst = backup_dir / pw.rel_path
+                _assert_never_protected(b_dst, root, cfg)
+                # Preserve earliest pre-upgrade backup if interrupted and re-run on the same day
+                if not b_dst.exists():
+                    _atomic_write_bytes(b_dst, pw.abs_path.read_bytes())
+                backed_up.append(b_dst.relative_to(root).as_posix())
+
+        for pw in planned:
+            _assert_never_protected(pw.abs_path, root, cfg)
+            _atomic_write_bytes(pw.abs_path, pw.new_bytes)
+
+    return UpgradeReport(
+        applied=apply,
+        writes=planned,
+        backup_dir=backup_dir,
+        backed_up_files=backed_up,
+        agents_dup_items=dup_items,
+        agents_needs_board_markers=needs_board_markers,
+        agents_needs_exception_subsec=needs_exc_subsec,
+    )
+
+
+def main(argv: Optional[list[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="将已有 multi-agent-project 项目升级到当前布局（默认只预览，--apply 才写盘；绝不写 AGENTS.md / 任务卡 / STATUS.md）"
+    )
+    parser.add_argument("path", nargs="?", default=".", help="待升级的项目或线级根目录（默认当前目录）")
+    parser.add_argument("--apply", action="store_true", help="实际写盘执行升级（默认仅预览）")
+    parser.add_argument("--dry-run", action="store_true", help="只预览不写盘（默认行为）")
+    parser.add_argument("--skill-dir", help="技能仓库根目录或 assets/ 目录（自动探测不到时指定）")
+    parser.add_argument("--today", help="备份目录日期覆盖 YYYY-MM-DD（仅测试用）")
+    parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
+    args = parser.parse_args(argv)
+
+    if args.apply and args.dry_run:
+        print("错误：--apply 与 --dry-run 不能同时指定。", file=sys.stderr)
+        return 2
+
+    root = Path(args.path).resolve()
+    if not root.is_dir():
+        print(f"错误：目录不存在：{root}", file=sys.stderr)
+        return 2
+
+    cur_day = datetime.strptime(args.today, "%Y-%m-%d").date() if args.today else datetime.now().date()
+    try:
+        assets_dir = resolve_skill_assets(args.skill_dir)
+    except FileNotFoundError as exc:
+        print(f"错误：{exc}", file=sys.stderr)
+        return 2
+
+    rep = plan_and_run_upgrade(root, apply=args.apply, skill_assets=assets_dir, today=cur_day)
+    mode_str = "已执行升级（--apply）" if rep.applied else "升级预览（默认只读，加 --apply 才写盘）"
+    print(f"=== {mode_str} | 目标：{root} ===")
+    print("受保护不写文件：AGENTS.md、STATUS.md、已有任务卡（均未触碰）")
+
+    if not rep.writes:
+        print("文件变更：0 项（已是最新状态，无需改动）。")
+    else:
+        print(f"文件变更（共 {len(rep.writes)} 项）：")
+        for pw in rep.writes:
+            print(f"  - {pw.summary}")
+        if rep.applied and rep.backup_dir is not None:
+            print(f"升级前备份目录：{rep.backup_dir.relative_to(root).as_posix()}/（共 {len(rep.backed_up_files)} 个文件）")
+        elif not rep.applied:
+            cfg = hl.load_handoff_config(root)
+            print(f"写盘前将备份原有文件至：{cfg.docs_dir}/_作废/升级前_{cur_day.isoformat()}/")
+
+    print("\n--- AGENTS.md 手工整理清单（脚本不自动修改 AGENTS.md） ---")
+    if rep.agents_dup_items:
+        print(
+            "1. §5 与 `文档/协作规矩.md` 重复、可由主控手工删除并改为一行指针的通用条目："
+            + "、".join(rep.agents_dup_items)
+        )
+    else:
+        print("1. §5 未检出与 `文档/协作规矩.md` 重复的通用条目。")
+    if rep.agents_needs_exception_subsec:
+        print("2. §5 建议新增 `### 本项目例外` 小节（存放项目特有例外，不直接改 `文档/协作规矩.md`）。")
+    else:
+        print("2. §5 已含“本项目例外”。")
+    if rep.agents_needs_board_markers:
+        print("3. §4 任务看板列表上下可手工加上两行标记，之后运行 `python scripts/sync_board.py` 自动同步：")
+        print("     <!-- board:start -->")
+        print("     ...（将由 sync_board.py 从卡面自动生成）...")
+        print("     <!-- board:end -->")
+    else:
+        print("3. §4 已含 `<!-- board:start --> … <!-- board:end -->` 标记，可直接运行 `python scripts/sync_board.py`。")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
