@@ -1200,10 +1200,10 @@ def test_041_d2_no_assets_pycache() -> None:
 
 
 def test_041_d3_versions_and_changelog() -> None:
-    """D3: All six scripts expose __version__ == '0.5.0' and --version; CHANGELOG.md documents 0.5.0 and upgrade guide."""
-    check(getattr(hl_mod, "__version__", None) == "0.5.0", "handoff_lib.__version__ must be '0.5.0'")
-    check(getattr(checker_mod, "__version__", None) == "0.5.0", "check_handoff.__version__ must be '0.5.0'")
-    check(getattr(archiver_mod, "__version__", None) == "0.5.0", "archive_status.__version__ must be '0.5.0'")
+    """D3: All six scripts expose __version__ == '0.5.1' and --version; CHANGELOG.md documents 0.5.1 and upgrade guide."""
+    check(getattr(hl_mod, "__version__", None) == "0.5.1", "handoff_lib.__version__ must be '0.5.1'")
+    check(getattr(checker_mod, "__version__", None) == "0.5.1", "check_handoff.__version__ must be '0.5.1'")
+    check(getattr(archiver_mod, "__version__", None) == "0.5.1", "archive_status.__version__ must be '0.5.1'")
 
     for sname in ("check_handoff.py", "archive_status.py", "sync_board.py", "upgrade.py", "fingerprint.py"):
         script = ASSETS_DIR / sname
@@ -1212,10 +1212,11 @@ def test_041_d3_versions_and_changelog() -> None:
             capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
         )
         combined = (res.stdout + res.stderr).strip()
-        check(res.returncode == 0 and "0.5.0" in combined, f"{script.name} --version must output 0.5.0, got: {combined}")
+        check(res.returncode == 0 and "0.5.1" in combined, f"{script.name} --version must output 0.5.1, got: {combined}")
 
     changelog = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
-    check(bool(re.search(r"(?m)^##\s+0\.5\.0\b", changelog)), "CHANGELOG.md must have a ## 0.5.0 section")
+    check(bool(re.search(r"(?m)^##\s+0\.5\.1\b", changelog)), "CHANGELOG.md must have a ## 0.5.1 section")
+    check(bool(re.search(r"(?m)^##\s+0\.5\.0\b", changelog)), "CHANGELOG.md must preserve ## 0.5.0 section")
     check("从 0.4.x 升级" in changelog, "CHANGELOG.md must include '从 0.4.x 升级' section")
     check(bool(re.search(r"(?m)^##\s+0\.4\.2\b", changelog)), "CHANGELOG.md must preserve ## 0.4.2 section")
     check(bool(re.search(r"(?m)^##\s+0\.4\.1\b", changelog)), "CHANGELOG.md must preserve ## 0.4.1 section")
@@ -2636,7 +2637,7 @@ def test_050_conv1_collab_rules() -> None:
     m = hl_mod.RULES_HEADER_RE.match(first_ln)
     check(bool(m and sep), f"assets/协作规矩.md line 1 must match fixed header format, got: {first_ln!r}")
     decl_ver, decl_sha = m.group(1), m.group(2).lower()
-    check(decl_ver == "0.5.0", f"assets/协作规矩.md line 1 version must be 0.5.0, got: {decl_ver}")
+    check(decl_ver == "0.5.1", f"assets/协作规矩.md line 1 version must be 0.5.1, got: {decl_ver}")
     actual_sha = hl_mod.compute_rules_body_sha256(raw_rules)
     check(actual_sha == decl_sha, f"assets/协作规矩.md body sha256 mismatch: header={decl_sha}, actual={actual_sha}")
 
@@ -2916,20 +2917,17 @@ def test_050_conv3_sync_board() -> None:
             "running sync_board twice must produce identical bytes",
         )
 
-        # Verify natural order (T1a, T2, T10, T10b), <=30 char truncation, pipe escaping, and checkbox state
+        # Verify natural order (T1a, T2, T10, T10b), untruncated task names, legacy filename fallback, pipe escaping, and checkbox state
         board_inner = ag_after1[len(ag_prefix) : len(ag_after1) - len(ag_suffix)].decode("utf-8")
         board_lines = board_inner.split("\r\n")[:-1]
         check(len(board_lines) == 4, f"expected 4 board lines, got {board_lines}")
         check(
             board_lines[0] == "- [x] **T1a 盘点数据源** —— ✅已收口"
-            and board_lines[1] == "- [x] **T2 没有卡号前缀的旧版一级标题** —— ✅已收口"
+            and board_lines[1] == "- [x] **T2 预处理** —— ✅已收口"
             and board_lines[2] == "- [x] **T10 含竖线|和*星号*的任务** —— 🗄️作废"
-            and board_lines[3].startswith("- [ ] **T10b ")
-            and board_lines[3].endswith("…** —— ⏳执行中"),
+            and board_lines[3] == "- [ ] **T10b 超长任务名称测试一二三四五六七八九十甲乙丙丁戊己庚辛壬癸子丑寅卯辰巳** —— ⏳执行中",
             f"unexpected board lines:\n{board_inner}",
         )
-        t10b_short = board_lines[3].split("**T10b ", 1)[1].split("**", 1)[0]
-        check(len(t10b_short) == 30, f"truncated task name must be 30 chars, got {len(t10b_short)}: {t10b_short!r}")
 
         cards_inner = idx_after1[len(idx_prefix) : len(idx_after1) - len(idx_suffix)].decode("utf-8")
         cards_lines = cards_inner.splitlines()
@@ -3509,7 +3507,7 @@ def test_050_r1_suggestions_1_to_7() -> None:
     rules_txt = (ASSETS_DIR / "协作规矩.md").read_text(encoding="utf-8")
     check("其他项目删掉" in rules_txt, "Suggestion 4 ('其他项目删掉') missing in 协作规矩.md")
     check("任务卡文件名不得含“复核”" in rules_txt, "Suggestion 5 ('任务卡文件名不得含“复核”') missing in 协作规矩.md")
-    ok_sha, msg_sha = hl_mod.verify_rules_file(ASSETS_DIR / "协作规矩.md", "0.5.0")
+    ok_sha, msg_sha = hl_mod.verify_rules_file(ASSETS_DIR / "协作规矩.md", "0.5.1")
     check(ok_sha, f"协作规矩.md SHA-256 header invalid after R1 edits: {msg_sha}")
 
     # Suggestion 6
@@ -3520,6 +3518,460 @@ def test_050_r1_suggestions_1_to_7() -> None:
     skill_txt = (REPO / "SKILL.md").read_text(encoding="utf-8")
     mode_a_sec = skill_txt.split("### 模式 A", 1)[1].split("### 模式 B", 1)[0]
     check("填完前" in mode_a_sec and "有【待填】提示属正常" in mode_a_sec, f"Suggestion 7 missing in SKILL.md Mode A:\n{mode_a_sec}")
+
+
+def test_051_conv1_legacy_cards() -> None:
+    """0.5.1 Convention 1: Legacy card compatibility using real Ningxia card headers + 3-step priority + verbatim state notes + edge cases."""
+    sync_script = ASSETS_DIR / "sync_board.py"
+
+    def run_sb(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(sync_script), str(target), *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(line / "文档" / "协作规矩.md", (ASSETS_DIR / "协作规矩.md").read_text(encoding="utf-8"))
+        cards_dir = line / "文档" / "任务卡"
+
+        # Real verbatim legacy card headers from Ningxia watershed project + 1 new-format card (T13f) + 1 unindexed legacy card (T99)
+        write(
+            cards_dir / "T1a_NAS已有数据盘点.md",
+            "# T1a 盘点 NAS 上已有的 GIS 数据：哪些能直接用于宁夏项目、哪些还得补下载\n\n"
+            "## 进度回写\n- 状态：✅已收口\n- 执行方：略\n",
+        )
+        write(
+            cards_dir / "T1d_GEE取LGRIP30灌溉耕地.md",
+            "# T1d 从 GEE 取 LGRIP30 灌溉/雨养耕地图（宁夏），只用来核对“灌溉补偿区”判定\n\n"
+            "## 进度回写\n- 状态：🗄️作废（2026-11-07，用户决定不设灌溉补偿区）\n- 执行方：略\n",
+        )
+        write(
+            cards_dir / "T5c_土壤保持SDR.md",
+            "# T5c 接 T5b：K 按张科利（2007）原文（EPIC 换成国际单位后再修正），K 闸门按原文范围，沿用 T5b 已核实的 R 与梯田输入，跑 InVEST SDR 得土壤保持量\n\n"
+            "## 进度回写\n- 状态：✅已收口\n- 执行方：略\n",
+        )
+        write(
+            cards_dir / "T13a_文档与画图工具评估.md",
+            "# T13a 评估处理文档、画图用什么软件和方式最好（技能升级专项）\n\n"
+            "## 进度回写\n- 状态：✅已收口\n- 执行方：略\n",
+        )
+        write(
+            cards_dir / "T13b_multi-agent-project技能0.4.0升级.md",
+            "# T13b 把 multi-agent-project 技能升级到 0.4.0：让脚本替人执行规矩，技能瘦身（接 T13 专项）\n\n"
+            "## 进度回写\n- 状态：✅已收口\n- 执行方：略\n",
+        )
+        # Legacy card whose card-face state changed (⏳->🟡) while index still had stale ⬜可派（急件） -> state word from card face, note from index!
+        write(
+            cards_dir / "T12f_内容二措施库页两图.md",
+            "# T12f 汇报 PPT 补一页“内容二措施库”两张图\n\n"
+            "## 进度回写\n- 状态：🔵待收口\n- 执行方：略\n\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n",
+        )
+        # New-format card header (Priority 1 beats existing index row short name!)
+        write(
+            cards_dir / "T13f_multi-agent-project技能0.5.1旧卡兼容.md",
+            "# T13f 把 multi-agent-project 修到 0.5.1：看板生成能用在旧卡上，升级补备份，收掉复查留下的 4 条\n"
+            "> 依赖：T13e\n"
+            "> 产物类型：数据与出图　成品给谁看：对外\n\n"
+            "## 进度回写\n- 状态：⏳执行中\n\n## 📋 执行方提示词\n做\n\n## 📋 复核方提示词\n核\n",
+        )
+        # Legacy card absent from index (Priority 3: filename after '_', depends='—') + H1 with brackets + letter card ID
+        write(
+            cards_dir / "T99_索引外新增旧卡.md",
+            "# （T99）这是一句很长的旧卡标题但索引里还没有登记\n\n"
+            "## 进度回写\n- 状态：✅已收口\n",
+        )
+        write(
+            cards_dir / "TA_字母编号清洗.md",
+            "# 【TA】字母卡号旧卡带未转义竖线备注测试\n\n"
+            "## 进度回写\n- 状态：✅已收口\n",
+        )
+
+        handwritten_index = (
+            "# 任务卡目录索引\n\n"
+            "## 任务卡清单\n\n"
+            "<!-- cards:start -->\n"
+            "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n"
+            "|---|---|---|---|---|\n"
+            "| T1a | NAS 已有数据盘点 | ✅已收口 | 无 | `任务卡/T1a_NAS已有数据盘点.md` |\n"
+            "| T1d | GEE 取 LGRIP30 灌溉耕地（旁证） | 🗄️作废（D-21） | T1b | `任务卡/T1d_GEE取LGRIP30灌溉耕地.md` |\n"
+            "| T5c | 土壤保持 SDR（K 顺序更正） | ✅已收口（中间产物，由 T5d 接续） | T5b 输入 | `任务卡/T5c_土壤保持SDR.md` |\n"
+            "| T12f | 汇报 PPT 补内容二措施库页两图（措施分布图＋类型统计图） | ⬜可派（已发老师\\|待确认） | T1c | `任务卡/T12f_内容二措施库页两图.md` |\n"
+            "| T13a | 文档处理与画图工具实测评估（技能升级专项） | ✅已收口（报告 `文档/工具评估/`） | 无 | `任务卡/T13a_文档与画图工具评估.md` |\n"
+            "| T13b | multi-agent-project 技能升级 0.4.0（技能升级专项） | ✅已收口（11-10 推送 1718779） | 无 | `任务卡/T13b_multi-agent-project技能0.4.0升级.md` |\n"
+            "| T13f | multi-agent-project 技能 0.5.1 旧卡兼容（看板生成读旧卡） | ⬜可派 | T13e | `任务卡/T13f_multi-agent-project技能0.5.1旧卡兼容.md` |\n"
+            "| TA | 字母编号数据清洗 | ✅已收口（方案A | 方案B） | T1a | `任务卡/TA_字母编号清洗.md` |\n"
+            "<!-- cards:end -->\n"
+        )
+        write(line / "文档" / "任务卡_README.md", handwritten_index)
+
+        ag_txt = (line / "AGENTS.md").read_text(encoding="utf-8").replace(
+            "- [x] T1 初稿\n- [ ] T2 方法",
+            "<!-- board:start -->\n- [x] T1 初稿\n<!-- board:end -->",
+        )
+        write(line / "AGENTS.md", ag_txt)
+
+        r1 = run_sb(line)
+        check(r1.returncode == 0, f"Conv1 sync_board failed:\n{r1.stdout}\n{r1.stderr}")
+        gen_idx = (line / "文档" / "任务卡_README.md").read_text(encoding="utf-8")
+
+        expected_rows = [
+            "| T1a | NAS 已有数据盘点 | ✅已收口 | 无 | `任务卡/T1a_NAS已有数据盘点.md` |",
+            "| T1d | GEE 取 LGRIP30 灌溉耕地（旁证） | 🗄️作废（D-21） | T1b | `任务卡/T1d_GEE取LGRIP30灌溉耕地.md` |",
+            "| T5c | 土壤保持 SDR（K 顺序更正） | ✅已收口（中间产物，由 T5d 接续） | T5b 输入 | `任务卡/T5c_土壤保持SDR.md` |",
+            "| T12f | 汇报 PPT 补内容二措施库页两图（措施分布图＋类型统计图） | 🔵待收口（已发老师\\|待确认） | T1c | `任务卡/T12f_内容二措施库页两图.md` |",
+            "| T13a | 文档处理与画图工具实测评估（技能升级专项） | ✅已收口（报告 `文档/工具评估/`） | 无 | `任务卡/T13a_文档与画图工具评估.md` |",
+            "| T13b | multi-agent-project 技能升级 0.4.0（技能升级专项） | ✅已收口（11-10 推送 1718779） | 无 | `任务卡/T13b_multi-agent-project技能0.4.0升级.md` |",
+            "| T13f | 把 multi-agent-project 修到 0.5.1：看板生成能用在旧卡上，升级补备份，收掉复查留下的 4 条 | ⏳执行中 | T13e | `任务卡/T13f_multi-agent-project技能0.5.1旧卡兼容.md` |",
+            "| T99 | 索引外新增旧卡 | ✅已收口 | — | `任务卡/T99_索引外新增旧卡.md` |",
+            "| TA | 字母编号数据清洗 | ✅已收口（方案A \\| 方案B） | T1a | `任务卡/TA_字母编号清洗.md` |",
+        ]
+        for exp_r in expected_rows:
+            check(exp_r in gen_idx, f"Conv1 missing expected generated row:\n  expected: {exp_r}\n  got:\n{gen_idx}")
+
+        # Idempotent 2nd run & --check
+        idx_bytes_1 = (line / "文档" / "任务卡_README.md").read_bytes()
+        r2 = run_sb(line)
+        check(r2.returncode == 0 and (line / "文档" / "任务卡_README.md").read_bytes() == idx_bytes_1, "Conv1 2nd sync_board must produce 0 diff")
+        check(run_sb(line, "--check").returncode == 0, "Conv1 --check must pass with rc=0")
+
+        # v0.5.0 project swapping ONLY scripts (协作规矩.md stays stamped v0.5.0) -> 0 FAILs (rc == 0)
+        v050_rules = hl_mod.stamp_rules_header((ASSETS_DIR / "协作规矩.md").read_text(encoding="utf-8"), "0.5.0")
+        write(line / "文档" / "协作规矩.md", v050_rules)
+        rc_v050, out_v050 = run(line)
+        check(
+            rc_v050 == 0 and "0 项失败" in out_v050 and "[A016] ⚠️" in out_v050,
+            f"v0.5.0 project swapping only scripts must have 0 FAILs:\n{out_v050}",
+        )
+
+        # Duplicate card IDs (`两张卡同号`: T1a_NAS已有数据盘点.md + T1a_补充补测.md) -> no crash, warn on stderr, no note/dep stealing
+        write(
+            cards_dir / "T1a_补充补测.md",
+            "# T1a 同号补充卡（索引中尚未登记）\n\n## 进度回写\n- 状态：⏳执行中\n",
+        )
+        r_dup = run_sb(line)
+        gen_dup = (line / "文档" / "任务卡_README.md").read_text(encoding="utf-8")
+        check(
+            r_dup.returncode == 0
+            and "卡号重复（T1a）" in r_dup.stderr
+            and "| T1a | NAS 已有数据盘点 | ✅已收口 | 无 | `任务卡/T1a_NAS已有数据盘点.md` |" in gen_dup
+            and "| T1a | 补充补测 | ⏳执行中 | — | `任务卡/T1a_补充补测.md` |" in gen_dup,
+            f"Conv1 duplicate card ID handling failed:\nstdout={r_dup.stdout}\nstderr={r_dup.stderr}\nidx=\n{gen_dup}",
+        )
+        r_dup_chk = run_sb(line, "--check")
+        check(r_dup_chk.returncode == 1 and "卡号重复（T1a）" in r_dup_chk.stderr, "duplicate card ID must fail sync_board --check")
+
+
+def test_051_conv2_migrate_card_heads() -> None:
+    """0.5.1 Convention 2: upgrade.py --migrate-card-heads preview/--apply, backup, exact 2-line byte diff (LF & CRLF+BOM), and indexless sync."""
+    upg_script = ASSETS_DIR / "upgrade.py"
+    sync_script = ASSETS_DIR / "sync_board.py"
+
+    def run_upg(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(upg_script), str(target), "--skill-dir", str(ASSETS_DIR), "--today", TODAY, *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    def run_sb(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(sync_script), str(target), *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        cards_dir = line / "文档" / "任务卡"
+        cards_dir.mkdir(parents=True, exist_ok=True)
+        c_lf = cards_dir / "T1a_NAS已有数据盘点.md"
+        c_crlf = cards_dir / "T5c_土壤保持SDR.md"
+        c_unidx = cards_dir / "T9_未入索引旧卡.md"
+        c_new = cards_dir / "T13f_新格式卡.md"
+
+        orig_lf = (
+            "# T1a 盘点 NAS 上已有的 GIS 数据：哪些能直接用于宁夏项目、哪些还得补下载\n\n"
+            "## 进度回写\n- 状态：✅已收口\n- 执行方：略  \n"
+        ).encode("utf-8")
+        orig_crlf = (
+            "\ufeff# T5c 接 T5b：K 按张科利（2007）原文重算 SDR\r\n\r\n"
+            "## 进度回写\r\n- 状态：✅已收口\r\n- 执行方：保留CRLF与BOM\r\n"
+        ).encode("utf-8")
+        orig_unidx = (
+            "# T9 这张卡不在索引表里\n\n## 进度回写\n- 状态：✅已收口\n"
+        ).encode("utf-8")
+        orig_new = (
+            "# T13f 已是新格式卡头\n> 依赖：T5c\n> 产物类型：数据与出图　成品给谁看：对外\n\n"
+            "## 进度回写\n- 状态：✅已收口\n"
+        ).encode("utf-8")
+
+        c_lf.write_bytes(orig_lf)
+        c_crlf.write_bytes(orig_crlf)
+        c_unidx.write_bytes(orig_unidx)
+        c_new.write_bytes(orig_new)
+
+        write(
+            line / "文档" / "任务卡_README.md",
+            "# 索引\n\n## 任务卡清单\n"
+            "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n"
+            "|---|---|---|---|---|\n"
+            "| T1a | NAS 已有数据盘点 | ✅已收口 | 无 | `任务卡/T1a_NAS已有数据盘点.md` |\n"
+            "| T5c | 土壤保持 SDR（K 顺序更正） | ✅已收口（由 T5d 接续） | T5b 输入 | `任务卡/T5c_土壤保持SDR.md` |\n"
+            "| T13f | 已是新格式卡头 | ✅已收口 | T5c | `任务卡/T13f_新格式卡.md` |\n",
+        )
+
+        # 1. Normal `upgrade.py --apply` MUST NOT call migrate_card_headers or touch any card
+        r_norm = run_upg(line, "--apply")
+        check(r_norm.returncode == 0, f"normal upgrade failed:\n{r_norm.stderr}")
+        check(
+            c_lf.read_bytes() == orig_lf and c_crlf.read_bytes() == orig_crlf and c_unidx.read_bytes() == orig_unidx and c_new.read_bytes() == orig_new,
+            "default upgrade.py --apply MUST NOT modify any task card",
+        )
+
+        # 2. `--migrate-card-heads` preview: lists 3 legacy cards (skips T13f), writes 0 bytes
+        r_prev = run_upg(line, "--migrate-card-heads")
+        check(
+            r_prev.returncode == 0
+            and "共 3 张旧卡" in r_prev.stdout
+            and "跳过已有新卡头 1 张" in r_prev.stdout
+            and "> 依赖：无" in r_prev.stdout
+            and "> 依赖：T5b 输入" in r_prev.stdout
+            and "> 依赖：未标注" in r_prev.stdout
+            and "> 产物类型：未标注" in r_prev.stdout,
+            f"migrate preview output mismatch:\n{r_prev.stdout}",
+        )
+        check(
+            c_lf.read_bytes() == orig_lf and c_crlf.read_bytes() == orig_crlf and c_unidx.read_bytes() == orig_unidx,
+            "--migrate-card-heads preview must touch 0 bytes",
+        )
+
+        # 3. `--migrate-card-heads --apply`: backs up originals, inserts ONLY 2 lines per legacy card, leaves T13f untouched
+        r_app = run_upg(line, "--migrate-card-heads", "--apply")
+        check(r_app.returncode == 0 and "共 3 张旧卡" in r_app.stdout, f"migrate --apply failed:\n{r_app.stdout}\n{r_app.stderr}")
+        check(c_new.read_bytes() == orig_new, "--migrate-card-heads --apply must not touch cards that already have new headers")
+
+        bdir = line / "文档" / "_作废" / f"升级前_{TODAY}"
+        for fp, expected_orig, eol_b in ((c_lf, orig_lf, b"\n"), (c_crlf, orig_crlf, b"\r\n"), (c_unidx, orig_unidx, b"\n")):
+            bak = bdir / fp.relative_to(line)
+            check(bak.is_file() and bak.read_bytes() == expected_orig, f"backup of {fp.name} must match original byte-for-byte")
+            after_lines = fp.read_bytes().splitlines(keepends=True)
+            orig_lines = expected_orig.splitlines(keepends=True)
+            check(len(after_lines) == len(orig_lines) + 2, f"{fp.name} must gain exact 2 lines")
+            check(
+                after_lines[1].endswith(eol_b)
+                and after_lines[2].endswith(eol_b)
+                and after_lines[1].decode("utf-8").startswith("> 依赖：")
+                and after_lines[2].decode("utf-8").rstrip("\r\n") == "> 产物类型：未标注",
+                f"{fp.name} inserted lines malformed: {after_lines[1:3]!r}",
+            )
+            reconstructed = b"".join(after_lines[:1] + after_lines[3:])
+            check(reconstructed == expected_orig, f"{fp.name} bytes outside the 2 inserted lines MUST be 100% identical!")
+
+        # 4. Idempotent 2nd `--migrate-card-heads --apply`: 0 cards to migrate
+        r_app2 = run_upg(line, "--migrate-card-heads", "--apply")
+        check(r_app2.returncode == 0 and "0 张" in r_app2.stdout, f"2nd migrate --apply must report 0 cards:\n{r_app2.stdout}")
+
+        # 5. Delete index table completely, leave empty markers, run sync_board.py -> 任务名 and 依赖 still exact!
+        write(line / "文档" / "任务卡_README.md", "# 索引\n\n## 任务卡清单\n<!-- cards:start -->\n<!-- cards:end -->\n")
+        r_sb = run_sb(line)
+        check(r_sb.returncode == 0, f"sync_board after deleting index table failed:\n{r_sb.stderr}")
+        rebuilt_idx = (line / "文档" / "任务卡_README.md").read_text(encoding="utf-8")
+        check(
+            "| T1a | NAS 已有数据盘点 | ✅已收口 | 无 | `任务卡/T1a_NAS已有数据盘点.md` |" in rebuilt_idx
+            and "| T5c | 土壤保持 SDR（K 顺序更正） | ✅已收口 | T5b 输入 | `任务卡/T5c_土壤保持SDR.md` |" in rebuilt_idx
+            and "| T9 | 未入索引旧卡 | ✅已收口 | 未标注 | `任务卡/T9_未入索引旧卡.md` |" in rebuilt_idx
+            and "| T13f | 已是新格式卡头 | ✅已收口 | T5c | `任务卡/T13f_新格式卡.md` |" in rebuilt_idx,
+            f"rebuilt index after deleting index table lost task_name or depends:\n{rebuilt_idx}",
+        )
+
+
+def test_051_conv3_backup_agents_md() -> None:
+    """0.5.1 Convention 3: upgrade.py --apply copies AGENTS.md into backup directory without modifying AGENTS.md."""
+    upg_script = ASSETS_DIR / "upgrade.py"
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        ag_fp = line / "AGENTS.md"
+        ag_orig = ag_fp.read_bytes()
+        write(line / "文档" / "任务卡" / "T1_初稿.md", "# T1 初稿\n\n## 进度回写\n- 状态：✅已收口\n")
+
+        # Preview writes nothing
+        r_prev = subprocess.run(
+            [sys.executable, "-B", str(upg_script), str(line), "--skill-dir", str(ASSETS_DIR), "--today", TODAY],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        bdir = line / "文档" / "_作废" / f"升级前_{TODAY}"
+        check(r_prev.returncode == 0 and not bdir.exists(), "preview must not create backup_dir")
+
+        # --apply copies AGENTS.md to backup_dir/AGENTS.md while leaving root/AGENTS.md untouched
+        r_app = subprocess.run(
+            [sys.executable, "-B", str(upg_script), str(line), "--skill-dir", str(ASSETS_DIR), "--today", TODAY, "--apply"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(r_app.returncode == 0, f"upgrade --apply failed:\n{r_app.stderr}")
+        check(ag_fp.read_bytes() == ag_orig, "upgrade --apply MUST NOT modify root AGENTS.md")
+        bak_ag = bdir / "AGENTS.md"
+        check(bak_ag.is_file() and bak_ag.read_bytes() == ag_orig, "upgrade --apply MUST copy AGENTS.md byte-for-byte into backup directory")
+
+
+def test_051_conv4_sec35_migration_hint() -> None:
+    """0.5.1 Convention 4: upgrade checklist prints §3.5 full-table migration hint iff AGENTS.md >25KB and §3.5 is largest section."""
+    upg_script = ASSETS_DIR / "upgrade.py"
+    target_phrase = "按 §3.5 规矩把决策表全文迁到 `文档/决策记录/决策登记表_全文.md`"
+
+    def run_upg_preview(target: Path) -> str:
+        res = subprocess.run(
+            [sys.executable, "-B", str(upg_script), str(target), "--skill-dir", str(ASSETS_DIR), "--today", TODAY],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+        check(res.returncode == 0, f"upgrade preview failed:\n{res.stderr}")
+        return res.stdout
+
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        base_ag = (line / "AGENTS.md").read_text(encoding="utf-8")
+
+        # 1. Small AGENTS.md (<25 KB) -> no §3.5 migration hint
+        out_small = run_upg_preview(line)
+        check(target_phrase not in out_small, f"small AGENTS.md must NOT trigger §3.5 migration hint:\n{out_small}")
+
+        # 2. AGENTS.md >25 KB AND §3.5 is largest section -> MUST print exact migration hint
+        big_rows = "".join(
+            f"| D-{i:02d} | ACTIVE | 决策项{i} | 统一采用 CGCS2000 Albers 250m 与 OPGD 寻优口径说明文本填充 | 保证口径一致 | 2026-09-15 | 方案附录 | -- | -- |\n"
+            for i in range(1, 160)
+        )
+        big_sec35_ag = base_ag.replace(
+            "## 3.5 决策登记表\n| ID | 决策 |\n|---|---|\n",
+            "## 3.5 决策登记表\n| ID | 状态 | 决策 | 取值/口径 | 理由 | 日期 | 证据文档 | 取代了谁 | 被谁取代 |\n|---|---|---|---|---|---|---|---|---|\n" + big_rows,
+        )
+        write(line / "AGENTS.md", big_sec35_ag)
+        check(len((line / "AGENTS.md").read_bytes()) > 25_000, "fixture AGENTS.md must exceed 25 KB")
+        out_big35 = run_upg_preview(line)
+        check(target_phrase in out_big35, f"AGENTS.md >25KB with §3.5 largest MUST print '{target_phrase}':\n{out_big35}")
+
+        # 3. AGENTS.md >25 KB because §5 is huge (while §3.5 is tiny) -> must NOT print §3.5 migration hint
+        big_sec5_ag = base_ag + "\n## 5. 铁律\n- **不可混用的维度**：" + ("领域铁律详述内容" * 1200) + "\n"
+        write(line / "AGENTS.md", big_sec5_ag)
+        check(len((line / "AGENTS.md").read_bytes()) > 25_000, "fixture big-sec5 AGENTS.md must exceed 25 KB")
+        out_big5 = run_upg_preview(line)
+        check(target_phrase not in out_big5, f"AGENTS.md >25KB with §5 largest must NOT blame §3.5:\n{out_big5}")
+
+
+def test_051_conv5_r1_four_suggestions() -> None:
+    """0.5.1 Convention 5: R1 4 suggestions — (a) 规则/要求 & H1 suspect rules, (b) board region validation, (c) malformed marker -> sync_board --check hint, (d) misplaced cards table section hint."""
+    upg_script = ASSETS_DIR / "upgrade.py"
+    sync_script = ASSETS_DIR / "sync_board.py"
+
+    def run_upg(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(upg_script), str(target), "--skill-dir", str(ASSETS_DIR), "--today", TODAY, *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    def run_sb(target: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-B", str(sync_script), str(target), *extra],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=_clean_env(),
+        )
+
+    # (a) Suspected rules keywords ('规则', '要求') + H1 heading (`# 卡面规矩`)
+    for heading_str, expect_piece in (
+        ("## 卡面规则", "`## 卡面规则`"),
+        ("## 提交要求", "`## 提交要求`"),
+        ("# 卡面规矩", "一级标题"),
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            line = build(Path(temp))
+            idx_txt = (
+                "# 任务卡目录索引\n\n## 任务卡清单\n"
+                "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n|---|---|---|---|---|\n"
+                "| T1 | 初稿 | ✅已收口 | 无 | `任务卡/T1_初稿.md` |\n\n"
+                f"{heading_str}\n\n自定义改写后的条文内容。\n"
+            )
+            write(line / "文档" / "任务卡_README.md", idx_txt)
+            r_a = run_upg(line)
+            check(
+                "旧规矩未迁出" in r_a.stdout and heading_str in r_a.stdout and expect_piece in r_a.stdout,
+                f"Conv5(a) failed for {heading_str!r}:\n{r_a.stdout}",
+            )
+
+    # (b) `board` marker region pre-write check rejects non-board content (table, heading, paragraph, non-checkbox bullet)
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(line / "文档" / "协作规矩.md", (ASSETS_DIR / "协作规矩.md").read_text(encoding="utf-8"))
+        write(line / "文档" / "任务卡" / "T1_初稿.md", "# T1 初稿\n> 依赖：无\n\n## 进度回写\n- 状态：✅已收口\n")
+        base_ag = (line / "AGENTS.md").read_text(encoding="utf-8")
+
+        for bad_inner in (
+            "| 阶段 | 任务 |\n|---|---|\n| 一期 | T1 |\n",
+            "### 4.1 子标题\n",
+            "这是一段手写说明文字。\n",
+            "- 没有勾选框的普通列表项\n",
+        ):
+            ag_bad = base_ag.replace("- [x] T1 初稿\n- [ ] T2 方法", f"<!-- board:start -->\n- [x] T1 初稿\n{bad_inner}<!-- board:end -->")
+            write(line / "AGENTS.md", ag_bad)
+            raw_before = (line / "AGENTS.md").read_bytes()
+            r_b = run_sb(line)
+            r_b_chk = run_sb(line, "--check")
+            combined_b = r_b.stdout + r_b.stderr
+            check(
+                r_b.returncode == 1
+                and r_b_chk.returncode == 1
+                and (line / "AGENTS.md").read_bytes() == raw_before
+                and "拒绝写入" in combined_b,
+                f"Conv5(b) must reject non-board content {bad_inner!r} inside board markers:\n{combined_b}",
+            )
+            rc_chk, out_chk = run(line)
+            check(rc_chk == 0 and "[A007] ⚠️" in out_chk and "拒绝写入" in out_chk, f"Conv5(b) A007 must warn on bad board content:\n{out_chk}")
+
+        # Empty board markers populate cleanly
+        write(line / "AGENTS.md", base_ag.replace("- [x] T1 初稿\n- [ ] T2 方法", "<!-- board:start -->\n<!-- board:end -->"))
+        check(run_sb(line).returncode == 0 and "**T1 初稿**" in (line / "AGENTS.md").read_text(encoding="utf-8"), "empty board markers must populate")
+
+    # (c) Upgrade summary prompts `sync_board.py --check` when `cards` or `board` markers are malformed
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        write(
+            line / "文档" / "任务卡_README.md",
+            "# 索引\n\n## 任务卡清单\n<!-- cards:start -->\n| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n|---|---|---|---|---|\n",
+        )
+        r_c = run_upg(line)
+        check(
+            any(ln.startswith("汇总：") and "已有标记但格式有误" in ln and "sync_board.py --check" in ln for ln in r_c.stdout.splitlines()),
+            f"Conv5(c) malformed cards marker summary line must prompt sync_board.py --check:\n{r_c.stdout}",
+        )
+
+    # (d) Card checklist table NOT in `任务卡清单` section -> prints hint naming which section it is in
+    with tempfile.TemporaryDirectory() as temp:
+        line = build(Path(temp))
+        # Subcase d1: `## 任务卡清单` has only stat table, real card table is in `## 附录总表`
+        idx_d1 = (
+            "# 索引\n\n"
+            "## 任务卡清单\n"
+            "| 状态 | 数量 |\n|---|---|\n| ✅ | 1 |\n\n"
+            "## 附录总表\n"
+            "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n|---|---|---|---|---|\n"
+            "| T1 | 初稿 | ✅已收口 | 无 | `任务卡/T1_初稿.md` |\n"
+        )
+        write(line / "文档" / "任务卡_README.md", idx_d1)
+        r_d1 = run_upg(line)
+        check(
+            "## 附录总表" in r_d1.stdout and "不在“任务卡清单”节" in r_d1.stdout,
+            f"Conv5(d1) must point out card table is in `## 附录总表`:\n{r_d1.stdout}",
+        )
+
+        # Subcase d2: No `## 任务卡清单` heading at all; card table is under `## 任务总览`
+        idx_d2 = (
+            "# 索引\n\n"
+            "## 任务总览\n"
+            "| 编号 | 任务名 | 状态 | 依赖 | 文件 |\n|---|---|---|---|---|\n"
+            "| T1 | 初稿 | ✅已收口 | 无 | `任务卡/T1_初稿.md` |\n"
+        )
+        write(line / "文档" / "任务卡_README.md", idx_d2)
+        r_d2 = run_upg(line)
+        check(
+            "## 任务总览" in r_d2.stdout and "任务卡清单" in r_d2.stdout,
+            f"Conv5(d2) must point out card table is in `## 任务总览`:\n{r_d2.stdout}",
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -3719,6 +4171,12 @@ def main(argv: list[str] | None = None) -> int:
     test_050_r1_f1_cards_table_header_validation()
     test_050_r1_f2_missing_rules_warning_and_checker()
     test_050_r1_suggestions_1_to_7()
+
+    test_051_conv1_legacy_cards()
+    test_051_conv2_migrate_card_heads()
+    test_051_conv3_backup_agents_md()
+    test_051_conv4_sec35_migration_hint()
+    test_051_conv5_r1_four_suggestions()
 
     check(not (ASSETS_DIR / "__pycache__").exists(), "assets/__pycache__ must not exist at end of test suite")
     print("All skill self-tests passed.")

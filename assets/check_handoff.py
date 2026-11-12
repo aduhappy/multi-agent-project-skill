@@ -59,7 +59,7 @@ from typing import Optional
 
 sys.dont_write_bytecode = True
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 for _stream in (sys.stdout, sys.stderr):
     try:
@@ -825,8 +825,12 @@ def advisories(
     if board_span is not None and board_span.state != "missing":
         if board_span.state == "malformed":
             drift.append(f"AGENTS.md 标记错误：{board_span.detail}")
-        elif sb_rows and _sb.compute_synced_bytes(agents_raw, board_span, "board", sb_rows) != agents_raw:
-            drift.append("AGENTS.md §4 board 标记区与卡面不一致（请运行 python scripts/sync_board.py）")
+        else:
+            b_ok, b_err = _sb.validate_board_marker_region(agents_raw, board_span)
+            if not b_ok:
+                drift.append(f"AGENTS.md {b_err}")
+            elif sb_rows and _sb.compute_synced_bytes(agents_raw, board_span, "board", sb_rows) != agents_raw:
+                drift.append("AGENTS.md §4 board 标记区与卡面不一致（请运行 python scripts/sync_board.py）")
     else:
         drift.extend(sec4_card_drifts(board_items, states))
 

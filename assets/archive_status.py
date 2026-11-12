@@ -29,7 +29,7 @@ from typing import Optional
 
 sys.dont_write_bytecode = True
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 for _stream in (sys.stdout, sys.stderr):
     try:

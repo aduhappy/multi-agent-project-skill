@@ -25,7 +25,7 @@ from typing import Optional, Sequence
 
 sys.dont_write_bytecode = True
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 
 DATE_RE = re.compile(r"(?<!\d)(20\d{2}-\d{2}-\d{2})(?!\d)")
 FLEX_DATE_TOKEN_RE = re.compile(
@@ -882,7 +882,7 @@ def pointer_ok(text: str) -> bool:
 def extract_card_id(stem: str) -> str:
     if "_" in stem:
         return stem.split("_")[0]
-    m = re.match(r"^([A-Za-z]+\d+[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)", stem)
+    m = re.match(r"^([A-Za-z]+\d+[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*|T[A-Z]{1,3}(?![A-Za-z0-9]))", stem)
     return m.group(1) if m else stem
 
 
@@ -1078,6 +1078,10 @@ class CardHeaderInfo:
     artifact_type: str
     audience: str
     has_new_header: bool
+    has_h1: bool = False
+    has_dep_line: bool = False
+    has_type_line: bool = False
+    h1_task_name: str = ""
 
 
 def _clean_header_choice(raw: str) -> str:
@@ -1093,8 +1097,15 @@ def _clean_header_choice(raw: str) -> str:
     return s
 
 
+_H1_CARD_ID_TOKEN = r"[A-Za-z]+\d+[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*|T[A-Z]{1,3}(?![A-Za-z0-9])"
+_H1_CARD_HEAD_RE = re.compile(
+    rf"^(?:[【\[（(]\s*(?P<b_cid>{_H1_CARD_ID_TOKEN})\s*[】\]）)](?:[_\s]+|\s*[:：—–\-]\s*)?(?P<b_rest>.*)$"
+    rf"|(?P<u_cid>{_H1_CARD_ID_TOKEN})(?:[_\s]+|\s*[:：—–\-]\s*|(?=[^\x00-\x7F]|[（(【\[]|$))(?P<u_rest>.*)$)"
+)
+
+
 def parse_card_header(text: str, fallback_stem: str = "") -> CardHeaderInfo:
-    """Parse 0.5.0 3-line card header (# T<id> <name> / > 依赖：... / > 产物类型：...) with safe fallback for legacy cards."""
+    """Parse 0.5.0/0.5.1 card header (# T<id> <name> / > 依赖：... / > 产物类型：...) with safe fallback for legacy cards."""
     doc = parse_markdown(text, strip_comments=True)
     header_blocks: list[Block] = []
     for b in doc.blocks:
@@ -1106,24 +1117,36 @@ def parse_card_header(text: str, fallback_stem: str = "") -> CardHeaderInfo:
     stem_name = fallback_stem.split("_", 1)[1].strip() if "_" in fallback_stem else fallback_stem.strip()
 
     h1_block = next((b for b in header_blocks if b.kind == "heading" and b.level == 1), None)
+    h1_task_name = ""
     if h1_block is not None:
         h1 = h1_block.title.strip()
-        m_h1 = re.match(
-            r"^([A-Za-z]+\d+[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*|T[A-Za-z])(?:[_\s]+|\s*[:：—–\-]\s*|$)(.*)$",
-            h1,
+        m_h1 = _H1_CARD_HEAD_RE.match(h1)
+        raw_cid = (m_h1.group("b_cid") or m_h1.group("u_cid")) if m_h1 else ""
+        # Accept H1 token as card_id unless fallback_stem has an explicit '_' prefix of a non-T card and H1 started with an unrelated word+digit (e.g. GEE2020)
+        accept_h1_cid = bool(
+            raw_cid
+            and (
+                not stem_cid
+                or "_" not in fallback_stem
+                or raw_cid.casefold() == stem_cid.casefold()
+                or raw_cid[0] in ("T", "t")
+            )
         )
-        if m_h1:
-            card_id = m_h1.group(1)
-            raw_name = m_h1.group(2).strip()
-            task_name = raw_name if raw_name else (stem_name or card_id)
+        if m_h1 and accept_h1_cid:
+            card_id = raw_cid
+            raw_name = (m_h1.group("b_rest") if m_h1.group("b_cid") else m_h1.group("u_rest")).strip()
+            h1_task_name = raw_name
+            base_task_name = raw_name if raw_name else (stem_name or card_id)
         else:
             card_id = stem_cid
-            task_name = h1 or stem_name or card_id
+            h1_task_name = h1
+            base_task_name = h1 or stem_name or card_id
     else:
         card_id = stem_cid
-        task_name = stem_name or card_id
+        base_task_name = stem_name or card_id
 
     depends = "—"
+    explicit_task_name = ""
     artifact_type = ""
     audience = ""
     has_dep_line = False
@@ -1138,15 +1161,28 @@ def parse_card_header(text: str, fallback_stem: str = "") -> CardHeaderInfo:
                 continue
             m_dep = re.search(r"(?:^|[\s\u3000；;|｜,，])\**依赖\**\s*[:：]\s*(.*)$", s)
             if m_dep and not has_dep_line:
-                has_dep_line = True
-                dep_raw = re.split(r"(?:[\s\u3000；;]+|\s*[|｜]\s*)(?=\**(?:产物类型|成品给谁看)\**\s*[:：])", m_dep.group(1))[0]
-                dep_clean = strip_placeholder_spans(dep_raw).strip(" \t\u3000；;。")
-                if dep_clean and not ("【" in dep_clean and "】" in dep_clean and ("分隔" in dep_clean or "卡号" in dep_clean)):
-                    depends = dep_clean
-                else:
-                    depends = "—"
+                dep_raw = re.split(
+                    r"(?:[\s\u3000；;]+|\s*[|｜]\s*)(?=\**(?:任务名|产物类型|成品给谁看)\**\s*[:：])",
+                    m_dep.group(1),
+                )[0]
+                is_tpl_dep = bool(
+                    PLACEHOLDER_RE.search(dep_raw)
+                    or ("【" in dep_raw and "】" in dep_raw and ("分隔" in dep_raw or "卡号" in dep_raw))
+                )
+                if not is_tpl_dep:
+                    has_dep_line = True
+                    dep_clean = strip_placeholder_spans(dep_raw).strip(" \t\u3000；;。")
+                    depends = dep_clean if dep_clean else "—"
+            m_tname = re.search(
+                r"(?:^|[\s\u3000；;|｜,，])\**任务名\**\s*[:：]\s*(.*?)(?=(?:[\s\u3000；;]+|\s*[|｜]\s*)\**(?:依赖|产物类型|成品给谁看)\**\s*[:：]|$)",
+                s,
+            )
+            if m_tname and not explicit_task_name:
+                tname_raw = m_tname.group(1).strip(" \t\u3000")
+                if tname_raw and not PLACEHOLDER_RE.search(tname_raw) and not (tname_raw.startswith("【") and tname_raw.endswith("】")):
+                    explicit_task_name = tname_raw
             m_art = re.search(
-                r"(?:^|[\s\u3000；;|｜,，])\**产物类型\**\s*[:：]\s*(.*?)(?=(?:[\s\u3000；;，,]+|\s*[|｜]\s*)?\**成品给谁看\**\s*[:：]|$)",
+                r"(?:^|[\s\u3000；;|｜,，])\**产物类型\**\s*[:：]\s*(.*?)(?=(?:[\s\u3000；;，,]+|\s*[|｜]\s*)?\**(?:任务名|依赖|成品给谁看)\**\s*[:：]|$)",
                 s,
             )
             if m_art and not has_type_line:
@@ -1156,13 +1192,18 @@ def parse_card_header(text: str, fallback_stem: str = "") -> CardHeaderInfo:
             if m_aud and not audience:
                 audience = _clean_header_choice(m_aud.group(1))
 
+    final_task_name = explicit_task_name or base_task_name
     return CardHeaderInfo(
         card_id=card_id,
-        task_name=task_name,
+        task_name=final_task_name,
         depends=depends,
         artifact_type=artifact_type,
         audience=audience,
-        has_new_header=bool(has_dep_line and has_type_line),
+        has_new_header=bool((h1_block is not None or explicit_task_name) and has_dep_line),
+        has_h1=(h1_block is not None),
+        has_dep_line=has_dep_line,
+        has_type_line=has_type_line,
+        h1_task_name=h1_task_name,
     )
 
 
@@ -1198,7 +1239,11 @@ def parse_card_state_label(text: str) -> tuple[Optional[str], str]:
             disp_sym = "🗄️" if sym == "🗄" else sym
             tail = src_val[mark.end() :].lstrip("\ufe0f \t*")
             m_word = re.match(r"^([^\s（(【\[<；;，,。/|`*—–\-]+)", tail)
-            word = m_word.group(1) if m_word else _DEFAULT_STATE_WORDS.get(sym, "")
+            cand_word = m_word.group(1) if m_word else ""
+            if not cand_word or re.match(r"^\d", cand_word):
+                word = _DEFAULT_STATE_WORDS.get(sym, "")
+            else:
+                word = cand_word
             return sym, f"{disp_sym}{word}"
     return None, ""
 
@@ -2022,7 +2067,7 @@ def _cli_main(argv: Optional[list[str]] = None) -> int:
 
     parser = argparse.ArgumentParser(description="handoff_lib 维护工具（生成或校验 协作规矩.md 首行哈希）")
     parser.add_argument("--stamp-rules", metavar="FILE", help="计算正文 SHA-256 并写入 FILE 第一行（UTF-8 LF）")
-    parser.add_argument("--rules-version", default="0.5.0", help="写入首行的规矩版本号（默认 0.5.0）")
+    parser.add_argument("--rules-version", default="0.5.1", help="写入首行的规矩版本号（默认 0.5.1）")
     parser.add_argument("--verify-rules", metavar="FILE", help="校验 FILE 的首行版本与正文 SHA-256")
     parser.add_argument("--version", "-V", action="version", version=f"%(prog)s {__version__}")
     args = parser.parse_args(argv)
